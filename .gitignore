@@ -1,0 +1,11 @@
+node_modules/
+.npm-cache/
+.artifact-work/
+.expo/
+.expo-home/
+expo-server.log
+dist/
+web-build/
+npm-debug.log*
+.env
+.env.*

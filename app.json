@@ -1,0 +1,16 @@
+{
+  "expo": {
+    "name": "Queens Bar App",
+    "slug": "queens-bar-app",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "platforms": ["ios", "web"],
+    "ios": {
+      "supportsTablet": false
+    },
+    "web": {
+      "bundler": "metro"
+    }
+  }
+}
