@@ -316,7 +316,19 @@ export default function App() {
     });
 
     if (error) {
-      setAuthMessage(error.message);
+      console.warn("Magic link failed", error);
+      const lowerMessage = error.message.toLowerCase();
+      const authCode = "code" in error ? error.code : undefined;
+
+      if (authCode === "over_email_send_rate_limit" || lowerMessage.includes("rate limit")) {
+        setAuthMessage("Too many login emails were requested. Wait a bit, or set up custom SMTP in Supabase Auth.");
+      } else if (authCode === "email_address_not_authorized") {
+        setAuthMessage("Supabase's default email sender blocked this address. Use a project member email or set up custom SMTP.");
+      } else if (lowerMessage.includes("error sending") || lowerMessage.includes("magic link")) {
+        setAuthMessage("Supabase could not send the login email. Check Auth logs, then set up custom SMTP if the built-in sender is failing.");
+      } else {
+        setAuthMessage(error.message);
+      }
       setAuthStatus("ready");
       return;
     }
