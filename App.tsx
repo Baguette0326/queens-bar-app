@@ -168,6 +168,7 @@ export default function App() {
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState<RemoteChatMessage[]>([]);
   const [chatStatus, setChatStatus] = useState<"idle" | "loading" | "sending" | "error">("idle");
+  const [chatMembersOpen, setChatMembersOpen] = useState(false);
   const [notifications, setNotifications] = useState<PlanNotification[]>([]);
   const [notificationsStatus, setNotificationsStatus] = useState<"idle" | "loading" | "error">("idle");
   const [peopleQuery, setPeopleQuery] = useState("");
@@ -427,6 +428,21 @@ export default function App() {
   const tier = xp >= 3000 ? "Gold III" : xp >= 2000 ? "Gold IV" : "Silver";
 
   useEffect(() => {
+    if (screen !== "chat" || !session || !selectedPlan?.id) return;
+
+    const interval = setInterval(() => {
+      refreshChat(selectedPlan.id).catch((error) => {
+        console.warn("Failed to refresh chat.", error);
+      });
+      loadRemotePlans(session.user.id, selectedPlan.id).catch((error) => {
+        console.warn("Failed to refresh chat attendees.", error);
+      });
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [screen, session?.user.id, selectedPlan?.id]);
+
+  useEffect(() => {
     if (planPlace !== "Other location" && !selectedChallenge.places.includes(planPlace)) {
       setPlanPlace(selectedChallenge.places[0] ?? "Other");
     }
@@ -504,9 +520,9 @@ export default function App() {
     if (!planId) return;
 
     setChatStatus("loading");
+    setChatMembersOpen(false);
     try {
-      const remoteMessages = await fetchChatMessages(planId);
-      setMessages(remoteMessages);
+      await refreshChat(planId);
       setChatStatus("idle");
     } catch (error) {
       console.warn("Failed to load chat.", error);
@@ -514,6 +530,13 @@ export default function App() {
       setChatStatus("error");
     }
     go("chat");
+  }
+
+  async function refreshChat(planId = selectedPlan?.id) {
+    if (!planId) return;
+
+    const remoteMessages = await fetchChatMessages(planId);
+    setMessages(remoteMessages);
   }
 
   async function toggleInterest() {
@@ -640,6 +663,7 @@ export default function App() {
 
     try {
       await joinRemotePlan(selectedPlan.id, session.user.id);
+      await sendChatMessage(selectedPlan.id, session.user.id, `${username} joined the plan.`);
       const remotePlans = await loadRemotePlans(session.user.id);
       const joinedPlan = remotePlans?.find((plan) => plan.id === selectedPlan.id);
       if (joinedPlan) setSelectedPlanId(joinedPlan.id);
@@ -1201,22 +1225,60 @@ export default function App() {
         {screen === "chat" && (
           <View style={styles.chatScreen}>
             <View style={styles.chatHeader}>
-              <Text style={styles.chatTitle}>{selectedChallenge.name.toUpperCase()}</Text>
-              <Text style={styles.chatStatus}>● Plan Chat · {selectedPlan.attendees.length} Online</Text>
+              <View style={styles.chatHeaderTop}>
+                <View style={styles.chatHeaderSpacer} />
+                <View style={styles.chatHeaderTitleBlock}>
+                  <Text style={styles.chatTitle}>{selectedChallenge.name.toUpperCase()}</Text>
+                  <Text style={styles.chatStatus}>● Plan Chat · {selectedPlan.attendees.length} Going</Text>
+                </View>
+                <Pressable
+                  accessibilityLabel="Show chat members"
+                  onPress={() => setChatMembersOpen((current) => !current)}
+                  style={({ pressed }) => [styles.chatMembersButton, pressedScale(pressed)]}
+                >
+                  <Users color={colors.ink} size={19} />
+                </Pressable>
+              </View>
             </View>
+            {chatMembersOpen && (
+              <View style={styles.chatMembersOverlay}>
+                <Pressable style={styles.chatMembersBackdrop} onPress={() => setChatMembersOpen(false)} />
+                <View style={styles.chatMembersDrawer}>
+                  <View style={styles.chatMembersDrawerHeader}>
+                    <Text style={styles.chatMembersTitle}>WHO'S IN</Text>
+                    <Pressable onPress={() => setChatMembersOpen(false)} style={({ pressed }) => [styles.chatMembersClose, pressedScale(pressed)]}>
+                      <Text style={styles.chatMembersCloseText}>X</Text>
+                    </Pressable>
+                  </View>
+                  <Text style={styles.chatMembersCount}>{selectedPlan.attendees.length} going</Text>
+                  {selectedPlan.attendees.map((attendee) => (
+                    <View key={attendee} style={styles.chatMemberRow}>
+                      <View style={styles.chatMemberAvatar}><AvatarIcon avatar="star" color={colors.ink} size={15} /></View>
+                      <Text style={styles.chatMemberRowText}>{attendee}</Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            )}
             <ScrollView contentContainerStyle={styles.chatList}>
               {chatStatus === "loading" && <Text style={styles.emptyState}>Loading chat...</Text>}
               {chatStatus !== "loading" && messages.length === 0 && (
                 <Text style={styles.emptyState}>No messages yet. Start the plan chat.</Text>
               )}
               {messages.map((item) => (
-                <View key={item.id} style={[styles.messageRow, item.senderId === session?.user.id && styles.messageRowMine]}>
-                  <View style={styles.miniAvatar}><AvatarIcon avatar={item.senderId === session?.user.id ? avatar : "star"} color={colors.ink} size={16} /></View>
-                  <View style={[styles.messageBubble, item.senderId === session?.user.id && styles.messageBubbleMine]}>
-                    <Text style={styles.messageFrom}>{item.from}</Text>
-                    <Text style={styles.messageText}>{item.body}</Text>
+                item.body.endsWith(" joined the plan.") ? (
+                  <View key={item.id} style={styles.systemMessage}>
+                    <Text style={styles.systemMessageText}>{item.body}</Text>
                   </View>
-                </View>
+                ) : (
+                  <View key={item.id} style={[styles.messageRow, item.senderId === session?.user.id && styles.messageRowMine]}>
+                    <View style={styles.miniAvatar}><AvatarIcon avatar={item.senderId === session?.user.id ? avatar : "star"} color={colors.ink} size={16} /></View>
+                    <View style={[styles.messageBubble, item.senderId === session?.user.id && styles.messageBubbleMine]}>
+                      <Text style={styles.messageFrom}>{item.from}</Text>
+                      <Text style={styles.messageText}>{item.body}</Text>
+                    </View>
+                  </View>
+                )
               ))}
             </ScrollView>
             <View style={styles.composer}>
@@ -1872,10 +1934,27 @@ const styles = StyleSheet.create({
   infoLabel: { width: 78, color: colors.ink, fontSize: 11, fontWeight: "900" },
   infoValue: { flex: 1, color: colors.ink, fontSize: 13, lineHeight: 18 },
   chatScreen: { flex: 1 },
-  chatHeader: { alignItems: "center", paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.line, backgroundColor: colors.paperLight },
+  chatHeader: { paddingVertical: 10, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: colors.line, backgroundColor: colors.paperLight },
+  chatHeaderTop: { flexDirection: "row", alignItems: "center" },
+  chatHeaderSpacer: { width: 40 },
+  chatHeaderTitleBlock: { flex: 1, alignItems: "center" },
   chatTitle: { color: colors.ink, fontSize: 18, fontWeight: "900" },
   chatStatus: { color: colors.green, fontSize: 11, marginTop: 2 },
+  chatMembersButton: { width: 40, height: 40, alignItems: "center", justifyContent: "center" },
+  chatMembersOverlay: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, zIndex: 20, flexDirection: "row", justifyContent: "flex-end" },
+  chatMembersBackdrop: { flex: 1, backgroundColor: "rgba(16,30,49,0.18)" },
+  chatMembersDrawer: { width: 230, backgroundColor: colors.paperLight, borderLeftWidth: 1, borderLeftColor: colors.line, padding: 14 },
+  chatMembersDrawerHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  chatMembersTitle: { color: colors.ink, fontSize: 14, fontWeight: "900" },
+  chatMembersClose: { width: 36, height: 36, alignItems: "center", justifyContent: "center" },
+  chatMembersCloseText: { color: colors.ink, fontSize: 14, fontWeight: "900" },
+  chatMembersCount: { color: colors.muted, fontSize: 11, fontWeight: "800", marginTop: 2, marginBottom: 12 },
+  chatMemberRow: { flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 1, borderColor: colors.line, borderRadius: 8, backgroundColor: colors.cream, padding: 8, marginBottom: 7 },
+  chatMemberAvatar: { width: 26, height: 26, borderRadius: 13, backgroundColor: colors.gold, alignItems: "center", justifyContent: "center" },
+  chatMemberRowText: { color: colors.ink, fontSize: 12, fontWeight: "900" },
   chatList: { padding: 14, paddingBottom: 82 },
+  systemMessage: { alignSelf: "center", backgroundColor: colors.cream, borderWidth: 1, borderColor: colors.line, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 5, marginBottom: 11 },
+  systemMessageText: { color: colors.muted, fontSize: 11, fontWeight: "800" },
   messageRow: { flexDirection: "row", gap: 7, marginBottom: 11, alignItems: "flex-start" },
   messageRowMine: { flexDirection: "row-reverse" },
   miniAvatar: { width: 27, height: 27, borderRadius: 14, backgroundColor: colors.gold, alignItems: "center", justifyContent: "center" },
