@@ -45,12 +45,13 @@ import { fetchChatMessages, RemoteChatMessage, sendChatMessage } from "./src/dat
 import { fetchCompletedBarIds, removeCompletedBar, selfCompleteBar } from "./src/data/completionRepository";
 import { fetchPinnedBarIds, pinBar, unpinBar } from "./src/data/interestRepository";
 import { fetchNotifications, markNotificationRead, PlanNotification } from "./src/data/notificationRepository";
+import { searchProfiles } from "./src/data/peopleRepository";
 import { cancelPlan as cancelRemotePlan, createPlan as createRemotePlan, fetchPlans, joinPlan as joinRemotePlan, RemotePlan } from "./src/data/planRepository";
 import { createProfile, fetchProfile, Profile, roleDbToLabel, updateProfileXp } from "./src/data/profileRepository";
 import { describeSupabaseError } from "./src/data/supabaseError";
 import { supabase } from "./src/lib/supabase";
 
-type Screen = "login" | "onboarding" | "discover" | "catalog" | "challenge" | "create" | "plan" | "chat" | "profile" | "notifications" | "completed";
+type Screen = "login" | "onboarding" | "discover" | "catalog" | "challenge" | "create" | "plan" | "chat" | "profile" | "notifications" | "completed" | "people" | "publicProfile";
 type CreatePlanDay = "Today" | "Tomorrow";
 
 type Plan = {
@@ -169,6 +170,11 @@ export default function App() {
   const [chatStatus, setChatStatus] = useState<"idle" | "loading" | "sending" | "error">("idle");
   const [notifications, setNotifications] = useState<PlanNotification[]>([]);
   const [notificationsStatus, setNotificationsStatus] = useState<"idle" | "loading" | "error">("idle");
+  const [peopleQuery, setPeopleQuery] = useState("");
+  const [peopleResults, setPeopleResults] = useState<Profile[]>([]);
+  const [peopleStatus, setPeopleStatus] = useState<"idle" | "loading" | "error">("idle");
+  const [selectedPublicProfile, setSelectedPublicProfile] = useState<Profile | null>(null);
+  const [publicCompletedBarIds, setPublicCompletedBarIds] = useState<string[]>([]);
 
   async function loadRemotePlans(userId?: string, preferredPlanId?: string) {
     setPlansStatus("loading");
@@ -205,6 +211,32 @@ export default function App() {
       console.warn("Failed to load notifications.", error);
       setNotificationsStatus("error");
       return null;
+    }
+  }
+
+  async function loadPeople(nextQuery = peopleQuery) {
+    setPeopleStatus("loading");
+    try {
+      const results = await searchProfiles(nextQuery, session?.user.id);
+      setPeopleResults(results);
+      setPeopleStatus("idle");
+      return results;
+    } catch (error) {
+      console.warn("Failed to search profiles.", error);
+      setPeopleStatus("error");
+      return [];
+    }
+  }
+
+  async function openPublicProfile(nextProfile: Profile) {
+    setSelectedPublicProfile(nextProfile);
+    setPublicCompletedBarIds([]);
+    setScreen("publicProfile");
+    try {
+      const ids = await fetchCompletedBarIds(nextProfile.id);
+      setPublicCompletedBarIds(ids);
+    } catch (error) {
+      console.warn("Failed to load public completions.", error);
     }
   }
 
@@ -270,6 +302,16 @@ export default function App() {
       listener.subscription.unsubscribe();
     };
   }, []);
+
+  useEffect(() => {
+    if (screen !== "people" || !session) return;
+
+    const timeout = setTimeout(() => {
+      loadPeople(peopleQuery);
+    }, 250);
+
+    return () => clearTimeout(timeout);
+  }, [peopleQuery, screen, session?.user.id]);
 
   useEffect(() => {
     let alive = true;
@@ -381,6 +423,7 @@ export default function App() {
   const selectedChallengeCompleted = completedBarIds.includes(selectedChallenge.id);
   const unreadNotificationCount = notifications.filter((notification) => !notification.readAt).length;
   const completedChallenges = catalog.filter((challenge) => completedBarIds.includes(challenge.id));
+  const publicCompletedChallenges = catalog.filter((challenge) => publicCompletedBarIds.includes(challenge.id));
   const tier = xp >= 3000 ? "Gold III" : xp >= 2000 ? "Gold IV" : "Silver";
 
   useEffect(() => {
@@ -589,7 +632,7 @@ export default function App() {
     );
   }
 
-  async function joinPlan() {
+  async function runJoinPlan() {
     if (!session) {
       go("login");
       return;
@@ -605,6 +648,30 @@ export default function App() {
       const message = error instanceof Error ? error.message : "Could not join plan.";
       Alert.alert("Join failed", message);
     }
+  }
+
+  function confirmJoinPlan() {
+    if (!session) {
+      go("login");
+      return;
+    }
+
+    const message = `${selectedChallenge.name}\n${selectedPlan.place} · ${selectedPlan.startsAt}\n\nJoin this plan so the organizer can see you are coming?`;
+
+    if (Platform.OS === "web") {
+      const confirmed = window.confirm(message);
+      if (confirmed) runJoinPlan();
+      return;
+    }
+
+    Alert.alert(
+      "Join this plan?",
+      message,
+      [
+        { text: "Not yet", style: "cancel" },
+        { text: "Confirm join", onPress: runJoinPlan }
+      ]
+    );
   }
 
   async function createPlan() {
@@ -768,7 +835,7 @@ export default function App() {
     }
   }
 
-  const showTabs = !["login", "onboarding", "challenge", "plan", "create", "notifications", "completed"].includes(screen);
+  const showTabs = !["login", "onboarding", "challenge", "plan", "create", "notifications", "completed", "people", "publicProfile"].includes(screen);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -853,7 +920,7 @@ export default function App() {
         )}
 
         {screen === "discover" && (
-          <AppScreen title="DISCOVER" right={<NotificationBell count={unreadNotificationCount} onPress={openNotifications} />}>
+          <AppScreen title="DISCOVER" right={<DiscoverHeaderActions count={unreadNotificationCount} onNotifications={openNotifications} onPeople={() => go("people")} />}>
             <SearchBar value={query} onChange={setQuery} placeholder="Search bars, locations, people..." />
             <FilterRow labels={["All", "Ongoing", "Upcoming", "Nearby", "Easy"]} />
             <SectionHeader title="ONGOING PLANS" action={plansStatusLabel(plansStatus)} />
@@ -881,6 +948,41 @@ export default function App() {
                 challenge={catalog.find((item) => item.id === notification.catalogBarId)}
                 onPress={() => openNotification(notification)}
               />
+            ))}
+          </DetailScreen>
+        )}
+
+        {screen === "people" && (
+          <DetailScreen back={() => go("profile")} title="PEOPLE">
+            <SearchBar value={peopleQuery} onChange={setPeopleQuery} placeholder="Search display names..." />
+            {peopleStatus === "loading" && <Text style={styles.emptyState}>Searching profiles...</Text>}
+            {peopleStatus === "error" && <Text style={styles.emptyState}>Could not load profiles. Check Supabase policies and try again.</Text>}
+            {peopleStatus !== "loading" && peopleResults.length === 0 && (
+              <Text style={styles.emptyState}>{peopleQuery.trim() ? "No matching profiles yet." : "No other profiles found yet."}</Text>
+            )}
+            {peopleResults.map((item) => (
+              <PeopleRow key={item.id} profile={item} onPress={() => openPublicProfile(item)} />
+            ))}
+          </DetailScreen>
+        )}
+
+        {screen === "publicProfile" && selectedPublicProfile && (
+          <DetailScreen back={() => go("people")} title="PROFILE">
+            <View style={styles.profileTop}>
+              <View style={styles.profileAvatar}><AvatarIcon avatar={selectedPublicProfile.avatar} color={colors.gold} size={42} /></View>
+              <View style={styles.profileNameBlock}>
+                <Text style={styles.profileName}>{selectedPublicProfile.username}</Text>
+                <Text style={styles.profileMeta}>
+                  {[selectedPublicProfile.year_label, selectedPublicProfile.program].filter(Boolean).join(" ") || roleDbToLabel(selectedPublicProfile.role)}
+                </Text>
+                <Tag text={roleDbToLabel(selectedPublicProfile.role).toUpperCase()} />
+              </View>
+              <View style={styles.tierPatch}><Text style={styles.tierSmall}>TIER</Text><Text style={styles.tierTitle}>{selectedPublicProfile.tier}</Text><Award color={colors.gold} size={28} /></View>
+            </View>
+            <SectionHeader title="COMPLETED BARS" action={`${publicCompletedChallenges.length}`} />
+            {publicCompletedChallenges.length === 0 && <Text style={styles.emptyState}>No completed bars shown yet.</Text>}
+            {publicCompletedChallenges.map((challenge) => (
+              <CompletedBarRow key={challenge.id} challenge={challenge} onPress={() => openChallenge(challenge.id)} />
             ))}
           </DetailScreen>
         )}
@@ -1088,9 +1190,9 @@ export default function App() {
             <PlanInfoRow icon={<AvatarIcon avatar="gear" color={colors.ink} size={18} />} label="STARTED BY" value={selectedPlan.startedBy} />
             <PlanInfoRow icon={<BookOpen color={colors.ink} size={18} />} label="NOTE" value={selectedPlan.note} />
             <PatchButton
-              label={selectedPlan.currentUserJoined || selectedPlan.attendees.includes(username) ? "OPEN GROUP CHAT" : "JOIN PLAN"}
+              label="I'M IN!"
               tone="green"
-              onPress={selectedPlan.currentUserJoined || selectedPlan.attendees.includes(username) ? () => openChat(selectedPlan.id) : joinPlan}
+              onPress={selectedPlan.currentUserJoined || selectedPlan.attendees.includes(username) ? () => openChat(selectedPlan.id) : confirmJoinPlan}
             />
             {currentUserStartedPlan && <OutlineButton label="CANCEL PLAN" onPress={cancelPlan} />}
           </DetailScreen>
@@ -1386,9 +1488,45 @@ function NotificationRow({
   );
 }
 
+function DiscoverHeaderActions({
+  count,
+  onNotifications,
+  onPeople
+}: {
+  count: number;
+  onNotifications: () => void;
+  onPeople: () => void;
+}) {
+  return (
+    <View style={styles.headerActions}>
+      <Pressable accessibilityLabel="Find people" onPress={onPeople} style={({ pressed }) => [styles.headerIconButton, pressedScale(pressed)]}>
+        <Users color={colors.ink} size={20} />
+      </Pressable>
+      <NotificationBell count={count} onPress={onNotifications} />
+    </View>
+  );
+}
+
+function PeopleRow({ profile, onPress }: { profile: Profile; onPress: () => void }) {
+  return (
+    <Pressable onPress={onPress} style={({ pressed }) => [styles.peopleRow, pressedScale(pressed)]}>
+      <View style={styles.peopleAvatar}><AvatarIcon avatar={profile.avatar} color={colors.gold} size={24} /></View>
+      <View style={styles.flex}>
+        <Text style={styles.peopleName}>{profile.username}</Text>
+        <Text style={styles.peopleMeta}>
+          {[roleDbToLabel(profile.role), profile.year_label, profile.program].filter(Boolean).join(" · ")}
+        </Text>
+      </View>
+      <View style={styles.peopleTier}>
+        <Text style={styles.peopleTierText}>{profile.tier}</Text>
+      </View>
+    </Pressable>
+  );
+}
+
 function ChallengePatch({ challenge, pinned, completed, onPress }: { challenge: Challenge; pinned?: boolean; completed?: boolean; onPress: () => void }) {
   const tone = patchTone(challenge.tone);
-  const displayCategory = getBrowseCategories(challenge).find((category) => category !== "Unreviewed") ?? challenge.difficulty;
+  const displayLabels = getChallengeCardLabels(challenge);
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [styles.challengePatch, { backgroundColor: tone.bg, borderColor: tone.border }, pressedScale(pressed)]}>
       {pinned && (
@@ -1411,8 +1549,12 @@ function ChallengePatch({ challenge, pinned, completed, onPress }: { challenge: 
         {challenge.name.toUpperCase()}
       </Text>
       <Text numberOfLines={3} style={[styles.challengePatchSummary, { color: tone.text }]}>{challenge.summary}</Text>
-      <View style={[styles.challengePatchCategoryPill, { borderColor: tone.text }]}>
-        <Text style={[styles.challengePatchCategory, { color: tone.text }]}>{displayCategory}</Text>
+      <View style={styles.challengePatchCategoryList}>
+        {displayLabels.map((label) => (
+          <View key={label} style={[styles.challengePatchCategoryPill, { borderColor: tone.text }]}>
+            <Text numberOfLines={1} style={[styles.challengePatchCategory, { color: tone.text }]}>{label}</Text>
+          </View>
+        ))}
       </View>
       <View style={styles.challengePatchFooter}><Text style={[styles.challengePatchMeta, { color: tone.text }]}>{challenge.difficulty}</Text><Text style={[styles.challengePatchMeta, { color: tone.text }]}>{challenge.xp} XP</Text></View>
       {(challenge.interested > 0 || challenge.upcoming > 0) && (
@@ -1420,6 +1562,16 @@ function ChallengePatch({ challenge, pinned, completed, onPress }: { challenge: 
       )}
     </Pressable>
   );
+}
+
+function getChallengeCardLabels(challenge: Challenge) {
+  const hiddenLabels = new Set(["Shenanigans", "Review required", challenge.difficulty]);
+  const categoryLabels = getBrowseCategories(challenge).filter((label) => label !== "Unreviewed");
+  return [
+    challenge.difficulty,
+    ...(categoryLabels.length > 0 ? categoryLabels : ["Participation"]),
+    ...challenge.tags
+  ].filter((label, index, labels) => !hiddenLabels.has(label) && labels.indexOf(label) === index);
 }
 
 function PlanPatch({ plan, onPress, catalog }: { plan: Plan; onPress: () => void; catalog: Challenge[] }) {
@@ -1614,6 +1766,8 @@ const styles = StyleSheet.create({
   detailHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", height: 48, paddingHorizontal: 12, backgroundColor: colors.paperLight },
   appHeaderTitle: { color: colors.ink, fontSize: 22, fontWeight: "900" },
   headerRight: { minWidth: 28, alignItems: "flex-end" },
+  headerActions: { flexDirection: "row", alignItems: "center", gap: 4 },
+  headerIconButton: { width: 40, height: 40, alignItems: "center", justifyContent: "center" },
   xpBadge: { color: colors.ink, fontSize: 12, fontWeight: "900", borderWidth: 1, borderColor: colors.ink, borderRadius: 5, paddingHorizontal: 6, paddingVertical: 3, fontVariant: ["tabular-nums"] },
   screenContent: { padding: 14, paddingBottom: 90 },
   searchBar: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: colors.paperLight, borderWidth: 1, borderColor: colors.line, borderRadius: 8, paddingHorizontal: 10, marginBottom: 10 },
@@ -1637,6 +1791,12 @@ const styles = StyleSheet.create({
   notificationBody: { color: colors.ink, fontSize: 12, lineHeight: 17, marginTop: 3 },
   notificationMeta: { color: colors.muted, fontSize: 11, fontWeight: "700", marginTop: 5 },
   unreadDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.red, marginTop: 5 },
+  peopleRow: { flexDirection: "row", alignItems: "center", gap: 10, borderWidth: 1, borderColor: colors.line, borderRadius: 8, backgroundColor: colors.paperLight, padding: 11, marginBottom: 9 },
+  peopleAvatar: { width: 42, height: 42, borderRadius: 21, borderWidth: 2, borderColor: colors.gold, backgroundColor: colors.navy, alignItems: "center", justifyContent: "center" },
+  peopleName: { color: colors.ink, fontSize: 14, fontWeight: "900" },
+  peopleMeta: { color: colors.muted, fontSize: 11, fontWeight: "700", marginTop: 3 },
+  peopleTier: { borderWidth: 1, borderColor: colors.ink, borderRadius: 5, paddingHorizontal: 7, paddingVertical: 4 },
+  peopleTierText: { color: colors.ink, fontSize: 10, fontWeight: "900" },
   planPatch: { flexDirection: "row", alignItems: "center", borderWidth: 2, borderRadius: 8, padding: 10, marginBottom: 9, borderStyle: "dashed" },
   planIcon: { width: 46, height: 46, borderWidth: 1, borderColor: colors.gold, borderRadius: 6, alignItems: "center", justifyContent: "center", marginRight: 10 },
   planPatchBody: { flex: 1 },
@@ -1655,7 +1815,8 @@ const styles = StyleSheet.create({
   challengePatchIcon: { alignItems: "center", justifyContent: "center", minHeight: 42 },
   challengePatchTitle: { minHeight: 42, fontSize: 17, lineHeight: 20, fontWeight: "900", textAlign: "center" },
   challengePatchSummary: { minHeight: 48, fontSize: 10, lineHeight: 14, textAlign: "center", opacity: 0.88 },
-  challengePatchCategoryPill: { alignSelf: "center", borderWidth: 1, borderRadius: 10, paddingHorizontal: 7, paddingVertical: 3, opacity: 0.82 },
+  challengePatchCategoryList: { minHeight: 22, flexDirection: "row", flexWrap: "wrap", justifyContent: "center", gap: 4 },
+  challengePatchCategoryPill: { maxWidth: "100%", borderWidth: 1, borderRadius: 10, paddingHorizontal: 7, paddingVertical: 3, opacity: 0.82 },
   challengePatchCategory: { fontSize: 8, fontWeight: "800", textAlign: "center" },
   challengePatchFooter: { flexDirection: "row", justifyContent: "space-between" },
   challengePatchMeta: { fontSize: 11, fontWeight: "800" },

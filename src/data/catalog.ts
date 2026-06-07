@@ -449,6 +449,9 @@ const campusKeywords = [
   "goodes",
   "clark",
   "campus",
+  "caf",
+  "cafeteria",
+  "cafeterias",
   "stauffer",
   "residence",
   "kingston",
@@ -472,7 +475,7 @@ const mediaKeywords = [
 const longFormKeywords = ["24/7", "week", "marathon", "40 days", "100", "century", "millennium", "all nighter"];
 
 function hasKeyword(challenge: Challenge, keywords: string[]) {
-  const text = `${challenge.name} ${challenge.tags.join(" ")}`.toLowerCase();
+  const text = `${challenge.name} ${challenge.summary} ${challenge.instructions} ${challenge.tags.join(" ")}`.toLowerCase();
   return keywords.some((keyword) => text.includes(keyword));
 }
 
