@@ -43,6 +43,7 @@ import { AvatarId, BrowseCategory, Challenge, ChallengeTone, challenges, getBrow
 import { fetchCatalogBars } from "./src/data/catalogRepository";
 import { fetchChatMessages, RemoteChatMessage, sendChatMessage } from "./src/data/chatRepository";
 import { fetchCompletedBarIds, removeCompletedBar, selfCompleteBar } from "./src/data/completionRepository";
+import { fetchDmMessages, fetchDmThreads, getOrCreateDmThread, RemoteDmMessage, RemoteDmThread, sendDmMessage } from "./src/data/dmRepository";
 import { fetchPinnedBarIds, pinBar, unpinBar } from "./src/data/interestRepository";
 import { fetchNotifications, markNotificationRead, PlanNotification } from "./src/data/notificationRepository";
 import { fetchLeaderboard, searchProfiles } from "./src/data/peopleRepository";
@@ -51,7 +52,7 @@ import { createProfile, fetchProfile, getRankFromXp, Profile, roleDbToLabel, upd
 import { describeSupabaseError } from "./src/data/supabaseError";
 import { supabase } from "./src/lib/supabase";
 
-type Screen = "login" | "onboarding" | "discover" | "catalog" | "challenge" | "create" | "plan" | "chats" | "chat" | "profile" | "notifications" | "completed" | "people" | "publicProfile" | "leaderboard";
+type Screen = "login" | "onboarding" | "discover" | "catalog" | "challenge" | "create" | "plan" | "chats" | "chat" | "dmThread" | "profile" | "notifications" | "completed" | "people" | "publicProfile" | "leaderboard";
 type CreatePlanDay = "Today" | "Tomorrow";
 
 type Plan = {
@@ -72,16 +73,16 @@ type Plan = {
 };
 
 const colors = {
-  paper: "#F5EBD6",
-  paperLight: "#FBF5E8",
-  ink: "#101E31",
-  muted: "#6D6558",
-  line: "#CBBFA7",
-  navy: "#082541",
-  red: "#A51F21",
-  green: "#15562E",
+  paper: "#09111D",
+  paperLight: "#14243A",
+  ink: "#F5EBD6",
+  muted: "#C4B99F",
+  line: "#415979",
+  navy: "#12365E",
+  red: "#9F2428",
+  green: "#166238",
   gold: "#E3A627",
-  cream: "#FFF9EC"
+  cream: "#FFF6DF"
 };
 
 const avatarOptions: { id: AvatarId; label: string }[] = [
@@ -171,6 +172,11 @@ export default function App() {
   const [messages, setMessages] = useState<RemoteChatMessage[]>([]);
   const [chatStatus, setChatStatus] = useState<"idle" | "loading" | "sending" | "error">("idle");
   const [chatMembersOpen, setChatMembersOpen] = useState(false);
+  const [dmThreads, setDmThreads] = useState<RemoteDmThread[]>([]);
+  const [selectedDmThreadId, setSelectedDmThreadId] = useState("");
+  const [dmMessages, setDmMessages] = useState<RemoteDmMessage[]>([]);
+  const [dmMessage, setDmMessage] = useState("");
+  const [dmStatus, setDmStatus] = useState<"idle" | "loading" | "sending" | "error">("idle");
   const [notifications, setNotifications] = useState<PlanNotification[]>([]);
   const [notificationsStatus, setNotificationsStatus] = useState<"idle" | "loading" | "error">("idle");
   const [peopleQuery, setPeopleQuery] = useState("");
@@ -346,12 +352,27 @@ export default function App() {
       loadRemotePlans(session.user.id).catch((error) => {
         console.warn("Failed to load chat inbox.", error);
       });
+      loadDmThreads().catch((error) => {
+        console.warn("Failed to load DM inbox.", error);
+      });
     }
 
     if (screen === "leaderboard") {
       loadLeaderboard();
     }
   }, [screen, session?.user.id]);
+
+  useEffect(() => {
+    if (screen !== "dmThread" || !session || !selectedDmThreadId) return;
+
+    const interval = setInterval(() => {
+      refreshDm(selectedDmThreadId).catch((error) => {
+        console.warn("Failed to refresh DM.", error);
+      });
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [screen, session?.user.id, selectedDmThreadId]);
 
   useEffect(() => {
     let alive = true;
@@ -483,6 +504,7 @@ export default function App() {
 
   const selectedChallenge = catalog.find((item) => item.id === selectedChallengeId) ?? catalog[0] ?? challenges[0];
   const selectedPlan = plans.find((item) => item.id === selectedPlanId) ?? plans[0];
+  const selectedDmThread = dmThreads.find((thread) => thread.id === selectedDmThreadId);
   const matchingLivePlans = plans.filter(
     (plan) => plan.challengeId === selectedChallenge.id && (plan.status === "ongoing" || plan.status === "upcoming")
   );
@@ -606,6 +628,58 @@ export default function App() {
 
     const remoteMessages = await fetchChatMessages(planId);
     setMessages(remoteMessages);
+  }
+
+  async function loadDmThreads() {
+    if (!session) return [];
+    const threads = await fetchDmThreads(session.user.id);
+    setDmThreads(threads);
+    return threads;
+  }
+
+  async function openDmThread(threadId: string) {
+    setSelectedDmThreadId(threadId);
+    setDmStatus("loading");
+    try {
+      const remoteMessages = await fetchDmMessages(threadId);
+      setDmMessages(remoteMessages);
+      setDmStatus("idle");
+      go("dmThread");
+    } catch (error) {
+      console.warn("Failed to load DM.", error);
+      setDmMessages([]);
+      setDmStatus("error");
+      go("dmThread");
+    }
+  }
+
+  async function startDm(otherUserId: string) {
+    if (!session) {
+      go("login");
+      return;
+    }
+
+    try {
+      const threadId = await getOrCreateDmThread(otherUserId);
+      const threads = await loadDmThreads();
+      if (!threads.some((thread) => thread.id === threadId)) {
+        setDmThreads(await fetchDmThreads(session.user.id));
+      }
+      await openDmThread(threadId);
+    } catch (error) {
+      const message = describeSupabaseError(error, "Could not start DM. Run supabase/add_dms.sql first.");
+      if (Platform.OS === "web") {
+        window.alert(`DM failed: ${message}`);
+      } else {
+        Alert.alert("DM failed", message);
+      }
+    }
+  }
+
+  async function refreshDm(threadId = selectedDmThreadId) {
+    if (!threadId) return;
+    const remoteMessages = await fetchDmMessages(threadId);
+    setDmMessages(remoteMessages);
   }
 
   async function toggleInterest() {
@@ -928,6 +1002,34 @@ export default function App() {
     }
   }
 
+  async function sendDirectMessage() {
+    if (!session || !selectedDmThreadId) {
+      go("login");
+      return;
+    }
+
+    const body = dmMessage.trim();
+    if (!body || dmStatus === "sending") return;
+
+    setDmStatus("sending");
+    setDmMessage("");
+    try {
+      const sentMessage = await sendDmMessage(selectedDmThreadId, session.user.id, body);
+      setDmMessages((current) => [...current, sentMessage]);
+      loadDmThreads().catch((error) => console.warn("Failed to refresh DM inbox.", error));
+      setDmStatus("idle");
+    } catch (error) {
+      setDmMessage(body);
+      setDmStatus("error");
+      const errorMessage = describeSupabaseError(error, "Could not send DM.");
+      if (Platform.OS === "web") {
+        window.alert(`DM failed: ${errorMessage}`);
+      } else {
+        Alert.alert("DM failed", errorMessage);
+      }
+    }
+  }
+
   const showTabs = !["login", "onboarding", "challenge", "plan", "create", "notifications", "completed", "people", "publicProfile", "leaderboard"].includes(screen);
 
   return (
@@ -1079,6 +1181,7 @@ export default function App() {
             </View>
             <FieldLabel text="BIO" />
             <Text style={styles.profileBio}>{selectedPublicProfile.bio || "No bio yet."}</Text>
+            {session?.user.id !== selectedPublicProfile.id && <PatchButton label="MESSAGE" tone="navy" onPress={() => startDm(selectedPublicProfile.id)} />}
             <SectionHeader title="COMPLETED BARS" action={`${publicCompletedChallenges.length}`} />
             {publicCompletedChallenges.length === 0 && <Text style={styles.emptyState}>No completed bars shown yet.</Text>}
             {publicCompletedChallenges.map((challenge) => (
@@ -1287,7 +1390,12 @@ export default function App() {
             <PlanInfoRow icon={<CalendarDays color={colors.ink} size={18} />} label="TIME" value={selectedPlan.startsAt} />
             <PlanInfoRow icon={<MapPin color={colors.ink} size={18} />} label="LOCATION" value={`${selectedPlan.place}\n${selectedPlan.detail}`} />
             <PlanInfoRow icon={<Users color={colors.ink} size={18} />} label="ATTENDEES" value={`${selectedPlan.attendees.length} / ${selectedPlan.cap ?? "∞"}`} />
-            <PlanInfoRow icon={<AvatarIcon avatar="gear" color={colors.ink} size={18} />} label="STARTED BY" value={selectedPlan.startedBy} />
+            <Pressable
+              onPress={() => selectedPlan.startedById && openPublicProfileById(selectedPlan.startedById, "plan")}
+              disabled={!selectedPlan.startedById}
+            >
+              <PlanInfoRow icon={<AvatarIcon avatar="gear" color={colors.ink} size={18} />} label="STARTED BY" value={selectedPlan.startedBy} />
+            </Pressable>
             <PlanInfoRow icon={<BookOpen color={colors.ink} size={18} />} label="NOTE" value={selectedPlan.note} />
             <PatchButton
               label="I'M IN!"
@@ -1299,11 +1407,16 @@ export default function App() {
         )}
 
         {screen === "chats" && (
-          <AppScreen title="CHATS" right={<Text style={styles.xpBadge}>{joinedPlans.length}</Text>}>
+          <AppScreen title="CHATS" right={<Text style={styles.xpBadge}>{joinedPlans.length + dmThreads.length}</Text>}>
             <SectionHeader title="YOUR GROUP CHATS" action={plansStatusLabel(plansStatus)} />
             {joinedPlans.length === 0 && <Text style={styles.emptyState}>Join a plan to start seeing its group chat here.</Text>}
             {joinedPlans.map((plan) => (
               <PlanPatch key={plan.id} plan={plan} catalog={catalog} onPress={() => openChat(plan.id)} />
+            ))}
+            <SectionHeader title="DIRECT MESSAGES" action={dmThreads.length ? `${dmThreads.length}` : undefined} />
+            {dmThreads.length === 0 && <Text style={styles.emptyState}>Open someone's profile and tap MESSAGE to start a DM.</Text>}
+            {dmThreads.map((thread) => (
+              <DmThreadRow key={thread.id} thread={thread} onPress={() => openDmThread(thread.id)} />
             ))}
           </AppScreen>
         )}
@@ -1384,6 +1497,46 @@ export default function App() {
               <Plus color={colors.ink} size={20} />
               <TextInput value={message} onChangeText={setMessage} placeholder={`Message ${selectedChallenge.name}...`} style={styles.composerInput} />
               <Pressable onPress={sendMessage} style={[styles.sendButton, chatStatus === "sending" && styles.sendButtonDisabled]}><Send color={colors.ink} size={18} /></Pressable>
+            </View>
+          </View>
+        )}
+
+        {screen === "dmThread" && (
+          <View style={styles.chatScreen}>
+            <View style={styles.chatHeader}>
+              <View style={styles.chatHeaderTop}>
+                <Pressable accessibilityLabel="Back to chats" onPress={() => go("chats")} style={({ pressed }) => [styles.chatMembersButton, pressedScale(pressed)]}>
+                  <ChevronLeft color={colors.ink} size={23} />
+                </Pressable>
+                <Pressable
+                  onPress={() => selectedDmThread?.otherUserId && openPublicProfileById(selectedDmThread.otherUserId, "dmThread")}
+                  style={styles.chatHeaderTitleBlock}
+                >
+                  <Text style={styles.chatTitle}>{selectedDmThread?.otherUsername.toUpperCase() ?? "DM"}</Text>
+                  <Text style={styles.chatStatus}>Direct Message</Text>
+                </Pressable>
+                <View style={styles.chatMembersButton} />
+              </View>
+            </View>
+            <ScrollView contentContainerStyle={styles.chatList}>
+              {dmStatus === "loading" && <Text style={styles.emptyState}>Loading messages...</Text>}
+              {dmStatus !== "loading" && dmMessages.length === 0 && (
+                <Text style={styles.emptyState}>No messages yet. Say hi.</Text>
+              )}
+              {dmMessages.map((item) => (
+                <View key={item.id} style={[styles.messageRow, item.senderId === session?.user.id && styles.messageRowMine]}>
+                  <View style={styles.miniAvatar}><AvatarIcon avatar={item.senderId === session?.user.id ? avatar : selectedDmThread?.otherAvatar ?? "star"} color={colors.ink} size={16} /></View>
+                  <View style={[styles.messageBubble, item.senderId === session?.user.id && styles.messageBubbleMine]}>
+                    <Text style={styles.messageFrom}>{item.from}</Text>
+                    <Text style={styles.messageText}>{item.body}</Text>
+                  </View>
+                </View>
+              ))}
+            </ScrollView>
+            <View style={styles.composer}>
+              <Plus color={colors.ink} size={20} />
+              <TextInput value={dmMessage} onChangeText={setDmMessage} placeholder={`Message ${selectedDmThread?.otherUsername ?? "user"}...`} style={styles.composerInput} />
+              <Pressable onPress={sendDirectMessage} style={[styles.sendButton, dmStatus === "sending" && styles.sendButtonDisabled]}><Send color={colors.ink} size={18} /></Pressable>
             </View>
           </View>
         )}
@@ -1584,7 +1737,7 @@ function BottomTabs({ active, onChange }: { active: Screen; onChange: (screen: S
     { screen: "discover", label: "Discover", icon: <Map color={active === "discover" ? colors.ink : colors.muted} size={20} /> },
     { screen: "catalog", label: "Catalog", icon: <BookOpen color={active === "catalog" ? colors.ink : colors.muted} size={20} /> },
     { screen: "create", label: "", icon: <Plus color={colors.cream} size={26} /> },
-    { screen: "chats", label: "Chat", icon: <MessageCircle color={active === "chat" || active === "chats" ? colors.ink : colors.muted} size={20} /> },
+    { screen: "chats", label: "Chat", icon: <MessageCircle color={active === "chat" || active === "chats" || active === "dmThread" ? colors.ink : colors.muted} size={20} /> },
     { screen: "profile", label: "Profile", icon: <UserRound color={active === "profile" ? colors.ink : colors.muted} size={20} /> }
   ];
   return (
@@ -1592,7 +1745,7 @@ function BottomTabs({ active, onChange }: { active: Screen; onChange: (screen: S
       {tabs.map((tab) => (
         <Pressable key={tab.screen} onPress={() => onChange(tab.screen)} style={tab.screen === "create" ? styles.createTab : styles.tab}>
           {tab.icon}
-          {!!tab.label && <Text style={[styles.tabText, (active === tab.screen || (tab.screen === "chats" && active === "chat")) && styles.tabTextActive]}>{tab.label}</Text>}
+          {!!tab.label && <Text style={[styles.tabText, (active === tab.screen || (tab.screen === "chats" && (active === "chat" || active === "dmThread"))) && styles.tabTextActive]}>{tab.label}</Text>}
         </Pressable>
       ))}
     </View>
@@ -1748,6 +1901,19 @@ function LeaderboardRow({ profile, place, onPress }: { profile: Profile; place: 
         <Text style={styles.peopleMeta}>{getRankFromXp(profile.xp)} · {profile.xp.toLocaleString()} XP</Text>
       </View>
       <Text style={styles.peopleTierText}>{getRankFromXp(profile.xp)}</Text>
+    </Pressable>
+  );
+}
+
+function DmThreadRow({ thread, onPress }: { thread: RemoteDmThread; onPress: () => void }) {
+  return (
+    <Pressable onPress={onPress} style={({ pressed }) => [styles.peopleRow, pressedScale(pressed)]}>
+      <View style={styles.peopleAvatar}><AvatarIcon avatar={thread.otherAvatar} color={colors.gold} size={24} /></View>
+      <View style={styles.flex}>
+        <Text style={styles.peopleName}>{thread.otherUsername}</Text>
+        <Text numberOfLines={1} style={styles.peopleMeta}>{thread.lastMessage}</Text>
+      </View>
+      <MessageCircle color={colors.gold} size={18} />
     </Pressable>
   );
 }
@@ -1949,12 +2115,12 @@ function AvatarIcon({ avatar, color, size }: { avatar: AvatarId; color: string; 
 function patchTone(tone: ChallengeTone) {
   if (tone === "red") return { bg: colors.red, border: "#741415", text: colors.cream };
   if (tone === "green") return { bg: colors.green, border: "#0C3A1D", text: colors.cream };
-  if (tone === "paper") return { bg: colors.cream, border: colors.line, text: colors.ink };
-  return { bg: colors.navy, border: "#031324", text: colors.cream };
+  if (tone === "paper") return { bg: "#243754", border: colors.line, text: colors.ink };
+  return { bg: colors.navy, border: "#315E8E", text: colors.cream };
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: "#E8DCC5" },
+  safeArea: { flex: 1, backgroundColor: "#07111F" },
   phone: { flex: 1, backgroundColor: colors.paper, alignSelf: "center", width: "100%", maxWidth: 520, borderColor: colors.line, borderLeftWidth: 1, borderRightWidth: 1 },
   flex: { flex: 1 },
   pressedScale: { transform: [{ scale: 0.96 }] },
@@ -1975,7 +2141,7 @@ const styles = StyleSheet.create({
   segmentTextActive: { color: colors.cream },
   formRow: { flexDirection: "row", gap: 8 },
   formInputShell: { flex: 1 },
-  durationSummary: { minWidth: 104, borderWidth: 1, borderColor: colors.line, borderRadius: 7, backgroundColor: colors.cream, paddingHorizontal: 10, paddingVertical: 8, justifyContent: "center" },
+  durationSummary: { minWidth: 104, borderWidth: 1, borderColor: colors.line, borderRadius: 7, backgroundColor: colors.paperLight, paddingHorizontal: 10, paddingVertical: 8, justifyContent: "center" },
   durationSummaryLabel: { color: colors.muted, fontSize: 9, fontWeight: "900" },
   durationSummaryValue: { color: colors.ink, fontSize: 13, fontWeight: "900", marginTop: 2, fontVariant: ["tabular-nums"] },
   avatarGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
@@ -1998,13 +2164,13 @@ const styles = StyleSheet.create({
   searchInput: { flex: 1, color: colors.ink, fontSize: 13, paddingVertical: 10 },
   filterRow: { gap: 6, paddingBottom: 4 },
   tag: { borderWidth: 1, borderColor: colors.line, backgroundColor: colors.paperLight, borderRadius: 14, paddingHorizontal: 9, paddingVertical: 5 },
-  tagActive: { backgroundColor: colors.ink, borderColor: colors.ink },
+  tagActive: { backgroundColor: colors.gold, borderColor: colors.gold },
   tagText: { color: colors.ink, fontSize: 11, fontWeight: "700" },
-  tagTextActive: { color: colors.cream },
+  tagTextActive: { color: colors.navy },
   sectionHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 18, marginBottom: 8 },
   sectionTitle: { color: colors.ink, fontSize: 13, fontWeight: "900" },
   sectionActionHit: { minWidth: 40, minHeight: 40, alignItems: "flex-end", justifyContent: "center" },
-  sectionAction: { color: "#235D9B", fontSize: 11, fontWeight: "800" },
+  sectionAction: { color: "#7DB7F0", fontSize: 11, fontWeight: "800" },
   notificationBell: { width: 40, height: 40, alignItems: "center", justifyContent: "center" },
   notificationCount: { position: "absolute", top: 0, right: 0, minWidth: 16, height: 16, borderRadius: 8, backgroundColor: colors.red, borderWidth: 1, borderColor: colors.paperLight, alignItems: "center", justifyContent: "center", paddingHorizontal: 3 },
   notificationCountText: { color: colors.cream, fontSize: 9, fontWeight: "900" },
@@ -2033,7 +2199,7 @@ const styles = StyleSheet.create({
   catalogGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: 10 },
   catalogCount: { color: colors.muted, fontSize: 11, fontWeight: "700", marginTop: 8 },
   clearFilters: { alignSelf: "flex-start", marginTop: 5, paddingVertical: 4 },
-  clearFiltersText: { color: "#235D9B", fontSize: 11, fontWeight: "800" },
+  clearFiltersText: { color: "#7DB7F0", fontSize: 11, fontWeight: "800" },
   emptyState: { color: colors.muted, fontSize: 13, lineHeight: 19, backgroundColor: colors.paperLight, borderWidth: 1, borderColor: colors.line, borderRadius: 8, padding: 12, marginBottom: 8 },
   challengePatch: { position: "relative", width: "48.5%", minHeight: 238, borderWidth: 2, borderRadius: 8, padding: 11, borderStyle: "dashed", justifyContent: "space-between" },
   pinnedBadge: { position: "absolute", top: 7, right: 7, width: 23, height: 23, borderRadius: 12, backgroundColor: colors.green, borderWidth: 1, borderColor: colors.gold, alignItems: "center", justifyContent: "center", zIndex: 2 },
@@ -2060,7 +2226,7 @@ const styles = StyleSheet.create({
   statBlockLabel: { color: colors.ink, fontSize: 11, fontWeight: "700" },
   patchButton: { borderWidth: 2, borderColor: colors.gold, borderStyle: "dashed", borderRadius: 8, alignItems: "center", paddingVertical: 13, marginTop: 12 },
   patchButtonText: { color: colors.cream, fontSize: 16, fontWeight: "900" },
-  outlineButton: { borderWidth: 1, borderColor: colors.ink, borderStyle: "dashed", borderRadius: 7, alignItems: "center", paddingVertical: 11, marginTop: 9 },
+  outlineButton: { borderWidth: 1, borderColor: colors.line, borderRadius: 7, alignItems: "center", paddingVertical: 11, marginTop: 9, backgroundColor: colors.paperLight },
   outlineButtonText: { color: colors.ink, fontSize: 14, fontWeight: "900" },
   progressSteps: { flexDirection: "row", alignItems: "center", marginBottom: 12 },
   progressDot: { width: 21, height: 21, borderWidth: 1, borderColor: colors.ink, borderRadius: 11, alignItems: "center", justifyContent: "center", backgroundColor: colors.paperLight },
@@ -2107,7 +2273,7 @@ const styles = StyleSheet.create({
   chatStatus: { color: colors.green, fontSize: 11, marginTop: 2 },
   chatMembersButton: { width: 40, height: 40, alignItems: "center", justifyContent: "center" },
   chatMembersOverlay: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, zIndex: 20, flexDirection: "row", justifyContent: "flex-end" },
-  chatMembersBackdrop: { flex: 1, backgroundColor: "rgba(16,30,49,0.18)" },
+  chatMembersBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.38)" },
   chatMembersDrawer: { width: 230, backgroundColor: colors.paperLight, borderLeftWidth: 1, borderLeftColor: colors.line, padding: 14 },
   chatMembersDrawerHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   chatMembersTitle: { color: colors.ink, fontSize: 14, fontWeight: "900" },
@@ -2124,7 +2290,7 @@ const styles = StyleSheet.create({
   messageRowMine: { flexDirection: "row-reverse" },
   miniAvatar: { width: 27, height: 27, borderRadius: 14, backgroundColor: colors.gold, alignItems: "center", justifyContent: "center" },
   messageBubble: { maxWidth: "78%", backgroundColor: colors.paperLight, borderWidth: 1, borderColor: colors.line, borderRadius: 7, padding: 8 },
-  messageBubbleMine: { backgroundColor: "#D6E8F2", borderColor: "#AFC8D9" },
+  messageBubbleMine: { backgroundColor: "#1B3B56", borderColor: "#315B7A" },
   messageFrom: { color: colors.ink, fontSize: 11, fontWeight: "900", marginBottom: 3 },
   messageText: { color: colors.ink, fontSize: 13, lineHeight: 18 },
   composer: { position: "absolute", left: 0, right: 0, bottom: 58, flexDirection: "row", alignItems: "center", gap: 8, padding: 9, borderTopWidth: 1, borderTopColor: colors.line, backgroundColor: colors.paperLight },
@@ -2141,7 +2307,7 @@ const styles = StyleSheet.create({
   tierSmall: { color: colors.cream, fontSize: 10, fontWeight: "800" },
   tierTitle: { color: colors.cream, fontSize: 14, fontWeight: "900", marginVertical: 3 },
   progressText: { color: colors.ink, fontSize: 12, fontWeight: "900", marginTop: 14, fontVariant: ["tabular-nums"] },
-  progressTrack: { height: 8, backgroundColor: "#DED1B7", borderRadius: 4, marginTop: 5, overflow: "hidden" },
+  progressTrack: { height: 8, backgroundColor: "#26384F", borderRadius: 4, marginTop: 5, overflow: "hidden" },
   progressFill: { height: "100%", backgroundColor: colors.navy },
   progressHint: { color: colors.ink, fontSize: 10, alignSelf: "flex-end", marginTop: 4 },
   badgeRow: { flexDirection: "row", gap: 8 },
@@ -2151,7 +2317,7 @@ const styles = StyleSheet.create({
   collectionIcon: { width: 30, height: 30, borderRadius: 6, borderWidth: 1, borderColor: colors.line, alignItems: "center", justifyContent: "center" },
   collectionTitle: { color: colors.ink, fontSize: 12, fontWeight: "900" },
   collectionValue: { color: colors.ink, fontSize: 11, fontWeight: "900", fontVariant: ["tabular-nums"] },
-  completedBarRow: { flexDirection: "row", alignItems: "center", gap: 9, backgroundColor: colors.cream, borderWidth: 1, borderColor: colors.gold, borderRadius: 7, padding: 9, marginBottom: 7 },
+  completedBarRow: { flexDirection: "row", alignItems: "center", gap: 9, backgroundColor: colors.paperLight, borderWidth: 1, borderColor: colors.gold, borderRadius: 7, padding: 9, marginBottom: 7 },
   completedBarIcon: { width: 30, height: 30, borderRadius: 15, backgroundColor: colors.green, alignItems: "center", justifyContent: "center" },
   completedBarTitle: { color: colors.ink, fontSize: 13, fontWeight: "900" },
   completedBarMeta: { color: colors.muted, fontSize: 11, fontWeight: "700", marginTop: 2 },
