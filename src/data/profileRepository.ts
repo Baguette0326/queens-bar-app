@@ -10,6 +10,7 @@ export type Profile = {
   program: string | null;
   year_label: string | null;
   default_area: string | null;
+  bio: string | null;
   xp: number;
   tier: string;
   accepted_guidelines_at: string | null;
@@ -20,10 +21,35 @@ export type ProfileInput = {
   username: string;
   avatar: AvatarId;
   roleLabel: string;
-  faculty: string;
-  program: string;
-  yearLabel: string;
+  faculty?: string;
+  program?: string;
+  yearLabel?: string;
+  bio?: string;
 };
+
+export type ProfileDetailsInput = {
+  userId: string;
+  avatar: AvatarId;
+  bio: string;
+};
+
+const profileSelect = "id,username,avatar,role,faculty,program,year_label,default_area,bio,xp,tier,accepted_guidelines_at";
+const legacyProfileSelect = "id,username,avatar,role,faculty,program,year_label,default_area,xp,tier,accepted_guidelines_at";
+
+function isMissingBioColumn(error: unknown) {
+  return typeof error === "object" && error !== null && "message" in error && String(error.message).toLowerCase().includes("bio");
+}
+
+function withBio(profile: Omit<Profile, "bio"> & { bio?: string | null }) {
+  return { ...profile, bio: profile.bio ?? null } as Profile;
+}
+
+export function getRankFromXp(xp: number) {
+  if (xp >= 6000) return "Diamond";
+  if (xp >= 3000) return "Gold";
+  if (xp >= 1000) return "Silver";
+  return "Iron";
+}
 
 export function roleLabelToDb(roleLabel: string): Profile["role"] {
   if (roleLabel === "Frec") return "frec";
@@ -42,44 +68,105 @@ export function roleDbToLabel(role: Profile["role"]) {
 export async function fetchProfile(userId: string) {
   const { data, error } = await supabase
     .from("profiles")
-    .select("id,username,avatar,role,faculty,program,year_label,default_area,xp,tier,accepted_guidelines_at")
+    .select(profileSelect)
     .eq("id", userId)
     .maybeSingle();
 
-  if (error) throw error;
-  return data as Profile | null;
+  if (!error) return data ? withBio(data as Omit<Profile, "bio"> & { bio?: string | null }) : null;
+  if (!isMissingBioColumn(error)) throw error;
+
+  const { data: legacyData, error: legacyError } = await supabase
+    .from("profiles")
+    .select(legacyProfileSelect)
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (legacyError) throw legacyError;
+  return legacyData ? withBio(legacyData as Omit<Profile, "bio">) : null;
 }
 
 export async function createProfile(input: ProfileInput) {
   const now = new Date().toISOString();
+  const profileInput = {
+    id: input.id,
+    username: input.username.trim(),
+    avatar: input.avatar,
+    role: roleLabelToDb(input.roleLabel),
+    faculty: input.faculty?.trim() || "Queen's",
+    program: input.program?.trim() || null,
+    year_label: input.yearLabel?.trim() || null,
+    accepted_guidelines_at: now
+  };
   const { data, error } = await supabase
     .from("profiles")
     .insert({
-      id: input.id,
-      username: input.username.trim(),
-      avatar: input.avatar,
-      role: roleLabelToDb(input.roleLabel),
-      faculty: input.faculty.trim() || "Engineering",
-      program: input.program.trim() || null,
-      year_label: input.yearLabel.trim() || null,
-      accepted_guidelines_at: now
+      ...profileInput,
+      bio: input.bio?.trim() || null,
     })
-    .select("id,username,avatar,role,faculty,program,year_label,default_area,xp,tier,accepted_guidelines_at")
+    .select(profileSelect)
     .single();
 
-  if (error) throw error;
-  return data as Profile;
+  if (!error) return withBio(data as Omit<Profile, "bio"> & { bio?: string | null });
+  if (!isMissingBioColumn(error)) throw error;
+
+  const { data: legacyData, error: legacyError } = await supabase
+    .from("profiles")
+    .insert(profileInput)
+    .select(legacyProfileSelect)
+    .single();
+
+  if (legacyError) throw legacyError;
+  return withBio(legacyData as Omit<Profile, "bio">);
 }
 
 export async function updateProfileXp(userId: string, xp: number) {
-  const tier = xp >= 3000 ? "Gold" : xp >= 1500 ? "Silver" : xp >= 500 ? "Bronze" : "Iron";
+  const tier = getRankFromXp(xp);
   const { data, error } = await supabase
     .from("profiles")
     .update({ xp, tier, updated_at: new Date().toISOString() })
     .eq("id", userId)
-    .select("id,username,avatar,role,faculty,program,year_label,default_area,xp,tier,accepted_guidelines_at")
+    .select(profileSelect)
     .single();
 
-  if (error) throw error;
-  return data as Profile;
+  if (!error) return withBio(data as Omit<Profile, "bio"> & { bio?: string | null });
+  if (!isMissingBioColumn(error)) throw error;
+
+  const { data: legacyData, error: legacyError } = await supabase
+    .from("profiles")
+    .update({ xp, tier, updated_at: new Date().toISOString() })
+    .eq("id", userId)
+    .select(legacyProfileSelect)
+    .single();
+
+  if (legacyError) throw legacyError;
+  return withBio(legacyData as Omit<Profile, "bio">);
+}
+
+export async function updateProfileDetails(input: ProfileDetailsInput) {
+  const { data, error } = await supabase
+    .from("profiles")
+    .update({
+      avatar: input.avatar,
+      bio: input.bio.trim() || null,
+      updated_at: new Date().toISOString()
+    })
+    .eq("id", input.userId)
+    .select(profileSelect)
+    .single();
+
+  if (!error) return withBio(data as Omit<Profile, "bio"> & { bio?: string | null });
+  if (!isMissingBioColumn(error)) throw error;
+
+  const { data: legacyData, error: legacyError } = await supabase
+    .from("profiles")
+    .update({
+      avatar: input.avatar,
+      updated_at: new Date().toISOString()
+    })
+    .eq("id", input.userId)
+    .select(legacyProfileSelect)
+    .single();
+
+  if (legacyError) throw legacyError;
+  return withBio(legacyData as Omit<Profile, "bio">);
 }

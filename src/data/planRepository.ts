@@ -11,6 +11,7 @@ export type RemotePlan = {
   endsAt: string;
   status: "ongoing" | "upcoming";
   attendees: string[];
+  attendeeProfiles: Array<{ id: string; username: string }>;
   cap?: number;
   note: string;
   startedBy: string;
@@ -75,6 +76,10 @@ function rowToPlan(row: PlanRow, currentUserId?: string): RemotePlan {
     endsAt: row.ends_at,
     status: computedStatus,
     attendees: activeAttendees.map((attendee) => firstRelation(attendee.profile)?.username ?? "User"),
+    attendeeProfiles: activeAttendees.map((attendee) => ({
+      id: attendee.user_id,
+      username: firstRelation(attendee.profile)?.username ?? "User"
+    })),
     cap: row.cap ?? undefined,
     note: row.note ?? "",
     startedBy: starter?.username ?? "Unknown",

@@ -16,6 +16,7 @@ create table public.profiles (
   program text,
   year_label text,
   default_area text,
+  bio text,
   completion_visibility text not null default 'public',
   xp integer not null default 0,
   tier text not null default 'Iron',

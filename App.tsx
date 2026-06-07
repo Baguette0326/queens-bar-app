@@ -45,13 +45,13 @@ import { fetchChatMessages, RemoteChatMessage, sendChatMessage } from "./src/dat
 import { fetchCompletedBarIds, removeCompletedBar, selfCompleteBar } from "./src/data/completionRepository";
 import { fetchPinnedBarIds, pinBar, unpinBar } from "./src/data/interestRepository";
 import { fetchNotifications, markNotificationRead, PlanNotification } from "./src/data/notificationRepository";
-import { searchProfiles } from "./src/data/peopleRepository";
+import { fetchLeaderboard, searchProfiles } from "./src/data/peopleRepository";
 import { cancelPlan as cancelRemotePlan, createPlan as createRemotePlan, fetchPlans, joinPlan as joinRemotePlan, RemotePlan } from "./src/data/planRepository";
-import { createProfile, fetchProfile, Profile, roleDbToLabel, updateProfileXp } from "./src/data/profileRepository";
+import { createProfile, fetchProfile, getRankFromXp, Profile, roleDbToLabel, updateProfileDetails, updateProfileXp } from "./src/data/profileRepository";
 import { describeSupabaseError } from "./src/data/supabaseError";
 import { supabase } from "./src/lib/supabase";
 
-type Screen = "login" | "onboarding" | "discover" | "catalog" | "challenge" | "create" | "plan" | "chat" | "profile" | "notifications" | "completed" | "people" | "publicProfile";
+type Screen = "login" | "onboarding" | "discover" | "catalog" | "challenge" | "create" | "plan" | "chats" | "chat" | "profile" | "notifications" | "completed" | "people" | "publicProfile" | "leaderboard";
 type CreatePlanDay = "Today" | "Tomorrow";
 
 type Plan = {
@@ -63,6 +63,7 @@ type Plan = {
   startsAtIso?: string;
   status: "ongoing" | "upcoming";
   attendees: string[];
+  attendeeProfiles?: Array<{ id: string; username: string }>;
   cap?: number;
   note: string;
   startedBy: string;
@@ -144,7 +145,8 @@ export default function App() {
   const [selectedPlanId, setSelectedPlanId] = useState("plan-beerio");
   const [username, setUsername] = useState("GearShift");
   const [avatar, setAvatar] = useState<AvatarId>("gear");
-  const [role, setRole] = useState("Eng Student");
+  const [draftBio, setDraftBio] = useState("");
+  const [role, setRole] = useState("Frosh");
   const [query, setQuery] = useState("");
   const [browseCategory, setBrowseCategory] = useState<BrowseCategory | "All">("All");
   const [difficulty, setDifficulty] = useState<Challenge["difficulty"] | "All">("All");
@@ -175,7 +177,11 @@ export default function App() {
   const [peopleResults, setPeopleResults] = useState<Profile[]>([]);
   const [peopleStatus, setPeopleStatus] = useState<"idle" | "loading" | "error">("idle");
   const [selectedPublicProfile, setSelectedPublicProfile] = useState<Profile | null>(null);
+  const [publicProfileBackScreen, setPublicProfileBackScreen] = useState<Screen>("people");
   const [publicCompletedBarIds, setPublicCompletedBarIds] = useState<string[]>([]);
+  const [leaderboard, setLeaderboard] = useState<Profile[]>([]);
+  const [leaderboardStatus, setLeaderboardStatus] = useState<"idle" | "loading" | "error">("idle");
+  const [profileSaveStatus, setProfileSaveStatus] = useState<"idle" | "saving">("idle");
 
   async function loadRemotePlans(userId?: string, preferredPlanId?: string) {
     setPlansStatus("loading");
@@ -229,8 +235,23 @@ export default function App() {
     }
   }
 
-  async function openPublicProfile(nextProfile: Profile) {
+  async function loadLeaderboard() {
+    setLeaderboardStatus("loading");
+    try {
+      const results = await fetchLeaderboard();
+      setLeaderboard(results);
+      setLeaderboardStatus("idle");
+      return results;
+    } catch (error) {
+      console.warn("Failed to load leaderboard.", error);
+      setLeaderboardStatus("error");
+      return [];
+    }
+  }
+
+  async function openPublicProfile(nextProfile: Profile, backScreen: Screen = "people") {
     setSelectedPublicProfile(nextProfile);
+    setPublicProfileBackScreen(backScreen);
     setPublicCompletedBarIds([]);
     setScreen("publicProfile");
     try {
@@ -239,6 +260,11 @@ export default function App() {
     } catch (error) {
       console.warn("Failed to load public completions.", error);
     }
+  }
+
+  async function openPublicProfileById(userId: string, backScreen: Screen = "chat") {
+    const nextProfile = await fetchProfile(userId);
+    if (nextProfile) openPublicProfile(nextProfile, backScreen);
   }
 
   useEffect(() => {
@@ -264,6 +290,7 @@ export default function App() {
         if (nextProfile) {
           setUsername(nextProfile.username);
           setAvatar(nextProfile.avatar);
+          setDraftBio(nextProfile.bio ?? "");
           setRole(roleDbToLabel(nextProfile.role));
           setXp(nextProfile.xp);
           setScreen("discover");
@@ -313,6 +340,18 @@ export default function App() {
 
     return () => clearTimeout(timeout);
   }, [peopleQuery, screen, session?.user.id]);
+
+  useEffect(() => {
+    if (screen === "chats" && session) {
+      loadRemotePlans(session.user.id).catch((error) => {
+        console.warn("Failed to load chat inbox.", error);
+      });
+    }
+
+    if (screen === "leaderboard") {
+      loadLeaderboard();
+    }
+  }, [screen, session?.user.id]);
 
   useEffect(() => {
     let alive = true;
@@ -398,10 +437,7 @@ export default function App() {
         id: session.user.id,
         username: trimmedUsername,
         avatar,
-        roleLabel: role,
-        faculty: "Engineering",
-        program: "Mechanical Engineering",
-        yearLabel: "2nd Year"
+        roleLabel: role
       });
       setProfile(savedProfile);
       setXp(savedProfile.xp);
@@ -411,6 +447,37 @@ export default function App() {
       Alert.alert("Profile not saved", message);
     } finally {
       setAuthStatus("ready");
+    }
+  }
+
+  async function saveProfileDetails() {
+    if (!session || profileSaveStatus === "saving") return;
+
+    setProfileSaveStatus("saving");
+    try {
+      const savedProfile = await updateProfileDetails({
+        userId: session.user.id,
+        avatar,
+        bio: draftBio.slice(0, 160)
+      });
+      setProfile(savedProfile);
+      setAvatar(savedProfile.avatar);
+      if (savedProfile.bio !== null || !draftBio.trim()) {
+        setDraftBio(savedProfile.bio ?? "");
+      } else if (Platform.OS === "web") {
+        window.alert("Avatar saved. Run supabase/add_profile_bio.sql to enable bio saving.");
+      } else {
+        Alert.alert("Avatar saved", "Run supabase/add_profile_bio.sql to enable bio saving.");
+      }
+    } catch (error) {
+      const message = describeSupabaseError(error, "Could not save profile.");
+      if (Platform.OS === "web") {
+        window.alert(`Profile failed: ${message}`);
+      } else {
+        Alert.alert("Profile failed", message);
+      }
+    } finally {
+      setProfileSaveStatus("idle");
     }
   }
 
@@ -425,7 +492,9 @@ export default function App() {
   const unreadNotificationCount = notifications.filter((notification) => !notification.readAt).length;
   const completedChallenges = catalog.filter((challenge) => completedBarIds.includes(challenge.id));
   const publicCompletedChallenges = catalog.filter((challenge) => publicCompletedBarIds.includes(challenge.id));
-  const tier = xp >= 3000 ? "Gold III" : xp >= 2000 ? "Gold IV" : "Silver";
+  const joinedPlans = plans.filter((plan) => plan.currentUserJoined || plan.attendees.includes(username));
+  const tier = getRankFromXp(xp);
+  const rankProgress = getRankProgress(xp);
 
   useEffect(() => {
     if (screen !== "chat" || !session || !selectedPlan?.id) return;
@@ -859,7 +928,7 @@ export default function App() {
     }
   }
 
-  const showTabs = !["login", "onboarding", "challenge", "plan", "create", "notifications", "completed", "people", "publicProfile"].includes(screen);
+  const showTabs = !["login", "onboarding", "challenge", "plan", "create", "notifications", "completed", "people", "publicProfile", "leaderboard"].includes(screen);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -912,11 +981,6 @@ export default function App() {
                 </Pressable>
               ))}
             </View>
-            <FieldLabel text="FACULTY / PROGRAM / YEAR" />
-            <View style={styles.formRow}>
-              <FakeSelect text="Mechanical Engineering" />
-              <FakeSelect text="2nd Year" compact />
-            </View>
             <FieldLabel text="PICK YOUR PATCH (AVATAR)" />
             <View style={styles.avatarGrid}>
               {avatarOptions.map((item) => (
@@ -944,7 +1008,7 @@ export default function App() {
         )}
 
         {screen === "discover" && (
-          <AppScreen title="DISCOVER" right={<DiscoverHeaderActions count={unreadNotificationCount} onNotifications={openNotifications} onPeople={() => go("people")} />}>
+          <AppScreen title="DISCOVER" right={<DiscoverHeaderActions count={unreadNotificationCount} onNotifications={openNotifications} onPeople={() => go("people")} onLeaderboard={() => go("leaderboard")} />}>
             <SearchBar value={query} onChange={setQuery} placeholder="Search bars, locations, people..." />
             <FilterRow labels={["All", "Ongoing", "Upcoming", "Nearby", "Easy"]} />
             <SectionHeader title="ONGOING PLANS" action={plansStatusLabel(plansStatus)} />
@@ -977,7 +1041,7 @@ export default function App() {
         )}
 
         {screen === "people" && (
-          <DetailScreen back={() => go("profile")} title="PEOPLE">
+          <DetailScreen back={() => go("discover")} title="PEOPLE">
             <SearchBar value={peopleQuery} onChange={setPeopleQuery} placeholder="Search display names..." />
             {peopleStatus === "loading" && <Text style={styles.emptyState}>Searching profiles...</Text>}
             {peopleStatus === "error" && <Text style={styles.emptyState}>Could not load profiles. Check Supabase policies and try again.</Text>}
@@ -990,8 +1054,18 @@ export default function App() {
           </DetailScreen>
         )}
 
+        {screen === "leaderboard" && (
+          <DetailScreen back={() => go("discover")} title="LEADERBOARD">
+            {leaderboardStatus === "loading" && <Text style={styles.emptyState}>Loading leaderboard...</Text>}
+            {leaderboardStatus === "error" && <Text style={styles.emptyState}>Could not load the leaderboard yet.</Text>}
+            {leaderboard.map((item, index) => (
+              <LeaderboardRow key={item.id} profile={item} place={index + 1} onPress={() => openPublicProfile(item, "leaderboard")} />
+            ))}
+          </DetailScreen>
+        )}
+
         {screen === "publicProfile" && selectedPublicProfile && (
-          <DetailScreen back={() => go("people")} title="PROFILE">
+          <DetailScreen back={() => go(publicProfileBackScreen)} title="PROFILE">
             <View style={styles.profileTop}>
               <View style={styles.profileAvatar}><AvatarIcon avatar={selectedPublicProfile.avatar} color={colors.gold} size={42} /></View>
               <View style={styles.profileNameBlock}>
@@ -1001,8 +1075,10 @@ export default function App() {
                 </Text>
                 <Tag text={roleDbToLabel(selectedPublicProfile.role).toUpperCase()} />
               </View>
-              <View style={styles.tierPatch}><Text style={styles.tierSmall}>TIER</Text><Text style={styles.tierTitle}>{selectedPublicProfile.tier}</Text><Award color={colors.gold} size={28} /></View>
+              <View style={styles.tierPatch}><Text style={styles.tierSmall}>TIER</Text><Text style={styles.tierTitle}>{getRankFromXp(selectedPublicProfile.xp)}</Text><Award color={colors.gold} size={28} /></View>
             </View>
+            <FieldLabel text="BIO" />
+            <Text style={styles.profileBio}>{selectedPublicProfile.bio || "No bio yet."}</Text>
             <SectionHeader title="COMPLETED BARS" action={`${publicCompletedChallenges.length}`} />
             {publicCompletedChallenges.length === 0 && <Text style={styles.emptyState}>No completed bars shown yet.</Text>}
             {publicCompletedChallenges.map((challenge) => (
@@ -1222,11 +1298,23 @@ export default function App() {
           </DetailScreen>
         )}
 
+        {screen === "chats" && (
+          <AppScreen title="CHATS" right={<Text style={styles.xpBadge}>{joinedPlans.length}</Text>}>
+            <SectionHeader title="YOUR GROUP CHATS" action={plansStatusLabel(plansStatus)} />
+            {joinedPlans.length === 0 && <Text style={styles.emptyState}>Join a plan to start seeing its group chat here.</Text>}
+            {joinedPlans.map((plan) => (
+              <PlanPatch key={plan.id} plan={plan} catalog={catalog} onPress={() => openChat(plan.id)} />
+            ))}
+          </AppScreen>
+        )}
+
         {screen === "chat" && (
           <View style={styles.chatScreen}>
             <View style={styles.chatHeader}>
               <View style={styles.chatHeaderTop}>
-                <View style={styles.chatHeaderSpacer} />
+                <Pressable accessibilityLabel="Back to chats" onPress={() => go("chats")} style={({ pressed }) => [styles.chatMembersButton, pressedScale(pressed)]}>
+                  <ChevronLeft color={colors.ink} size={23} />
+                </Pressable>
                 <View style={styles.chatHeaderTitleBlock}>
                   <Text style={styles.chatTitle}>{selectedChallenge.name.toUpperCase()}</Text>
                   <Text style={styles.chatStatus}>● Plan Chat · {selectedPlan.attendees.length} Going</Text>
@@ -1251,11 +1339,20 @@ export default function App() {
                     </Pressable>
                   </View>
                   <Text style={styles.chatMembersCount}>{selectedPlan.attendees.length} going</Text>
-                  {selectedPlan.attendees.map((attendee) => (
-                    <View key={attendee} style={styles.chatMemberRow}>
+                  {(selectedPlan.attendeeProfiles?.length ? selectedPlan.attendeeProfiles : selectedPlan.attendees.map((attendee) => ({ id: attendee, username: attendee }))).map((attendee) => (
+                    <Pressable
+                      key={attendee.id}
+                      onPress={() => {
+                        if (selectedPlan.attendeeProfiles?.length) {
+                          setChatMembersOpen(false);
+                          openPublicProfileById(attendee.id, "chat");
+                        }
+                      }}
+                      style={({ pressed }) => [styles.chatMemberRow, pressedScale(pressed)]}
+                    >
                       <View style={styles.chatMemberAvatar}><AvatarIcon avatar="star" color={colors.ink} size={15} /></View>
-                      <Text style={styles.chatMemberRowText}>{attendee}</Text>
-                    </View>
+                      <Text style={styles.chatMemberRowText}>{attendee.username}</Text>
+                    </Pressable>
                   ))}
                 </View>
               </View>
@@ -1274,7 +1371,9 @@ export default function App() {
                   <View key={item.id} style={[styles.messageRow, item.senderId === session?.user.id && styles.messageRowMine]}>
                     <View style={styles.miniAvatar}><AvatarIcon avatar={item.senderId === session?.user.id ? avatar : "star"} color={colors.ink} size={16} /></View>
                     <View style={[styles.messageBubble, item.senderId === session?.user.id && styles.messageBubbleMine]}>
-                      <Text style={styles.messageFrom}>{item.from}</Text>
+                      <Pressable onPress={() => openPublicProfileById(item.senderId, "chat")}>
+                        <Text style={styles.messageFrom}>{item.from}</Text>
+                      </Pressable>
                       <Text style={styles.messageText}>{item.body}</Text>
                     </View>
                   </View>
@@ -1295,14 +1394,42 @@ export default function App() {
               <View style={styles.profileAvatar}><AvatarIcon avatar={avatar} color={colors.gold} size={42} /></View>
               <View style={styles.profileNameBlock}>
                 <Text style={styles.profileName}>{username}</Text>
-                <Text style={styles.profileMeta}>2nd Year Mechanical</Text>
-                <Tag text="ENG STUDENT" />
+                <Text style={styles.profileMeta}>{profile ? roleDbToLabel(profile.role) : role}</Text>
+                <Tag text={(profile ? roleDbToLabel(profile.role) : role).toUpperCase()} />
               </View>
               <View style={styles.tierPatch}><Text style={styles.tierSmall}>TIER</Text><Text style={styles.tierTitle}>{tier}</Text><Award color={colors.gold} size={28} /></View>
             </View>
-            <Text style={styles.progressText}>{xp.toLocaleString()} / 3,000 XP</Text>
-            <View style={styles.progressTrack}><View style={[styles.progressFill, { width: `${Math.min(100, (xp / 3000) * 100)}%` }]} /></View>
-            <Text style={styles.progressHint}>{Math.max(0, 3000 - xp)} XP to Gold III</Text>
+            <FieldLabel text="PROFILE PATCH" />
+            <View style={styles.avatarGrid}>
+              {avatarOptions.map((item) => (
+                <Pressable
+                  key={item.id}
+                  accessibilityLabel={item.label}
+                  onPress={() => setAvatar(item.id)}
+                  style={[styles.avatarOption, avatar === item.id && styles.avatarOptionActive]}
+                >
+                  <AvatarIcon avatar={item.id} size={30} color={avatar === item.id ? colors.gold : colors.ink} />
+                </Pressable>
+              ))}
+            </View>
+            <FieldLabel text="BIO" />
+            <View style={styles.bioBox}>
+              <TextInput
+                value={draftBio}
+                onChangeText={(text) => setDraftBio(text.slice(0, 160))}
+                style={styles.bioInput}
+                multiline
+                placeholder="Add a short bio..."
+                placeholderTextColor={colors.muted}
+              />
+              <Text style={styles.counter}>{draftBio.length}/160</Text>
+            </View>
+            <OutlineButton label={profileSaveStatus === "saving" ? "SAVING..." : "SAVE PROFILE"} onPress={saveProfileDetails} />
+            <Text style={styles.progressText}>{xp.toLocaleString()} / {rankProgress.target.toLocaleString()} XP</Text>
+            <View style={styles.progressTrack}><View style={[styles.progressFill, { width: `${rankProgress.progress}%` }]} /></View>
+            <Text style={styles.progressHint}>
+              {rankProgress.remaining > 0 ? `${rankProgress.remaining.toLocaleString()} XP to ${rankProgress.next}` : "Max rank reached"}
+            </Text>
             <SectionHeader title="COSMETIC BADGES" action="See all" />
             <View style={styles.badgeRow}>
               <Badge icon="star" label="FIRST PLAN" tone="red" />
@@ -1362,6 +1489,30 @@ function plansStatusLabel(status: "local" | "loading" | "remote" | "error") {
   if (status === "loading") return "Loading";
   if (status === "error") return "Local fallback";
   return "Local";
+}
+
+function getRankProgress(xp: number) {
+  const ranks = [
+    { name: "Iron", min: 0 },
+    { name: "Silver", min: 1000 },
+    { name: "Gold", min: 3000 },
+    { name: "Diamond", min: 6000 }
+  ];
+  const currentIndex = Math.max(0, ranks.findIndex((rank, index) => xp >= rank.min && (!ranks[index + 1] || xp < ranks[index + 1].min)));
+  const current = ranks[currentIndex];
+  const next = ranks[currentIndex + 1];
+
+  if (!next) {
+    return { current: current.name, next: "Max rank", progress: 100, remaining: 0, target: current.min };
+  }
+
+  return {
+    current: current.name,
+    next: next.name,
+    progress: Math.min(100, ((xp - current.min) / (next.min - current.min)) * 100),
+    remaining: Math.max(0, next.min - xp),
+    target: next.min
+  };
 }
 
 function formatCreateTime(date: Date) {
@@ -1433,7 +1584,7 @@ function BottomTabs({ active, onChange }: { active: Screen; onChange: (screen: S
     { screen: "discover", label: "Discover", icon: <Map color={active === "discover" ? colors.ink : colors.muted} size={20} /> },
     { screen: "catalog", label: "Catalog", icon: <BookOpen color={active === "catalog" ? colors.ink : colors.muted} size={20} /> },
     { screen: "create", label: "", icon: <Plus color={colors.cream} size={26} /> },
-    { screen: "chat", label: "Chat", icon: <MessageCircle color={active === "chat" ? colors.ink : colors.muted} size={20} /> },
+    { screen: "chats", label: "Chat", icon: <MessageCircle color={active === "chat" || active === "chats" ? colors.ink : colors.muted} size={20} /> },
     { screen: "profile", label: "Profile", icon: <UserRound color={active === "profile" ? colors.ink : colors.muted} size={20} /> }
   ];
   return (
@@ -1441,7 +1592,7 @@ function BottomTabs({ active, onChange }: { active: Screen; onChange: (screen: S
       {tabs.map((tab) => (
         <Pressable key={tab.screen} onPress={() => onChange(tab.screen)} style={tab.screen === "create" ? styles.createTab : styles.tab}>
           {tab.icon}
-          {!!tab.label && <Text style={[styles.tabText, active === tab.screen && styles.tabTextActive]}>{tab.label}</Text>}
+          {!!tab.label && <Text style={[styles.tabText, (active === tab.screen || (tab.screen === "chats" && active === "chat")) && styles.tabTextActive]}>{tab.label}</Text>}
         </Pressable>
       ))}
     </View>
@@ -1459,10 +1610,6 @@ function BrandMark() {
 
 function FieldLabel({ text }: { text: string }) {
   return <Text style={styles.fieldLabel}>{text}</Text>;
-}
-
-function FakeSelect({ text, compact }: { text: string; compact?: boolean }) {
-  return <View style={[styles.fakeSelect, compact && styles.fakeSelectCompact]}><Text style={styles.fakeSelectText}>{text}</Text><Text style={styles.chevron}>⌄</Text></View>;
 }
 
 function SearchBar({ value, onChange, placeholder }: { value: string; onChange: (text: string) => void; placeholder: string }) {
@@ -1553,16 +1700,21 @@ function NotificationRow({
 function DiscoverHeaderActions({
   count,
   onNotifications,
-  onPeople
+  onPeople,
+  onLeaderboard
 }: {
   count: number;
   onNotifications: () => void;
   onPeople: () => void;
+  onLeaderboard: () => void;
 }) {
   return (
     <View style={styles.headerActions}>
       <Pressable accessibilityLabel="Find people" onPress={onPeople} style={({ pressed }) => [styles.headerIconButton, pressedScale(pressed)]}>
         <Users color={colors.ink} size={20} />
+      </Pressable>
+      <Pressable accessibilityLabel="Leaderboard" onPress={onLeaderboard} style={({ pressed }) => [styles.headerIconButton, pressedScale(pressed)]}>
+        <Award color={colors.ink} size={20} />
       </Pressable>
       <NotificationBell count={count} onPress={onNotifications} />
     </View>
@@ -1580,8 +1732,22 @@ function PeopleRow({ profile, onPress }: { profile: Profile; onPress: () => void
         </Text>
       </View>
       <View style={styles.peopleTier}>
-        <Text style={styles.peopleTierText}>{profile.tier}</Text>
+        <Text style={styles.peopleTierText}>{getRankFromXp(profile.xp)}</Text>
       </View>
+    </Pressable>
+  );
+}
+
+function LeaderboardRow({ profile, place, onPress }: { profile: Profile; place: number; onPress: () => void }) {
+  return (
+    <Pressable onPress={onPress} style={({ pressed }) => [styles.leaderboardRow, pressedScale(pressed)]}>
+      <Text style={styles.leaderboardPlace}>{place}</Text>
+      <View style={styles.peopleAvatar}><AvatarIcon avatar={profile.avatar} color={colors.gold} size={24} /></View>
+      <View style={styles.flex}>
+        <Text style={styles.peopleName}>{profile.username}</Text>
+        <Text style={styles.peopleMeta}>{getRankFromXp(profile.xp)} · {profile.xp.toLocaleString()} XP</Text>
+      </View>
+      <Text style={styles.peopleTierText}>{getRankFromXp(profile.xp)}</Text>
     </Pressable>
   );
 }
@@ -1812,10 +1978,6 @@ const styles = StyleSheet.create({
   durationSummary: { minWidth: 104, borderWidth: 1, borderColor: colors.line, borderRadius: 7, backgroundColor: colors.cream, paddingHorizontal: 10, paddingVertical: 8, justifyContent: "center" },
   durationSummaryLabel: { color: colors.muted, fontSize: 9, fontWeight: "900" },
   durationSummaryValue: { color: colors.ink, fontSize: 13, fontWeight: "900", marginTop: 2, fontVariant: ["tabular-nums"] },
-  fakeSelect: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderWidth: 1, borderColor: colors.line, borderRadius: 7, backgroundColor: colors.paperLight, paddingHorizontal: 10, paddingVertical: 10 },
-  fakeSelectCompact: { flex: 0.55 },
-  fakeSelectText: { color: colors.ink, fontSize: 12, fontWeight: "700" },
-  chevron: { color: colors.muted, fontSize: 14 },
   avatarGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   avatarOption: { width: 58, height: 58, alignItems: "center", justifyContent: "center", backgroundColor: colors.paperLight, borderWidth: 1, borderColor: colors.line, borderRadius: 7 },
   avatarOptionActive: { backgroundColor: colors.navy, borderColor: colors.gold, borderWidth: 2 },
@@ -1859,6 +2021,8 @@ const styles = StyleSheet.create({
   peopleMeta: { color: colors.muted, fontSize: 11, fontWeight: "700", marginTop: 3 },
   peopleTier: { borderWidth: 1, borderColor: colors.ink, borderRadius: 5, paddingHorizontal: 7, paddingVertical: 4 },
   peopleTierText: { color: colors.ink, fontSize: 10, fontWeight: "900" },
+  leaderboardRow: { flexDirection: "row", alignItems: "center", gap: 10, borderWidth: 1, borderColor: colors.line, borderRadius: 8, backgroundColor: colors.paperLight, padding: 11, marginBottom: 9 },
+  leaderboardPlace: { width: 26, color: colors.ink, fontSize: 15, fontWeight: "900", textAlign: "center", fontVariant: ["tabular-nums"] },
   planPatch: { flexDirection: "row", alignItems: "center", borderWidth: 2, borderRadius: 8, padding: 10, marginBottom: 9, borderStyle: "dashed" },
   planIcon: { width: 46, height: 46, borderWidth: 1, borderColor: colors.gold, borderRadius: 6, alignItems: "center", justifyContent: "center", marginRight: 10 },
   planPatchBody: { flex: 1 },
@@ -1928,6 +2092,8 @@ const styles = StyleSheet.create({
   noteBox: { height: 54, borderWidth: 1, borderColor: colors.line, borderRadius: 7, backgroundColor: colors.paperLight, padding: 9 },
   noteInput: { flex: 1, color: colors.ink, fontSize: 12, padding: 0, textAlignVertical: "top" },
   noteText: { color: colors.ink, fontSize: 12 },
+  bioBox: { minHeight: 88, borderWidth: 1, borderColor: colors.line, borderRadius: 7, backgroundColor: colors.paperLight, padding: 9 },
+  bioInput: { minHeight: 54, color: colors.ink, fontSize: 13, lineHeight: 18, padding: 0, textAlignVertical: "top" },
   counter: { alignSelf: "flex-end", color: colors.muted, fontSize: 10, marginTop: 7 },
   infoRow: { flexDirection: "row", alignItems: "flex-start", paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.line },
   infoIcon: { width: 28, paddingTop: 1 },
@@ -1936,7 +2102,6 @@ const styles = StyleSheet.create({
   chatScreen: { flex: 1 },
   chatHeader: { paddingVertical: 10, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: colors.line, backgroundColor: colors.paperLight },
   chatHeaderTop: { flexDirection: "row", alignItems: "center" },
-  chatHeaderSpacer: { width: 40 },
   chatHeaderTitleBlock: { flex: 1, alignItems: "center" },
   chatTitle: { color: colors.ink, fontSize: 18, fontWeight: "900" },
   chatStatus: { color: colors.green, fontSize: 11, marginTop: 2 },
@@ -1971,6 +2136,7 @@ const styles = StyleSheet.create({
   profileNameBlock: { flex: 1, gap: 3 },
   profileName: { color: colors.ink, fontSize: 22, fontWeight: "900" },
   profileMeta: { color: colors.ink, fontSize: 12 },
+  profileBio: { color: colors.ink, fontSize: 13, lineHeight: 19, backgroundColor: colors.paperLight, borderWidth: 1, borderColor: colors.line, borderRadius: 7, padding: 10, marginTop: 12 },
   tierPatch: { width: 82, height: 92, backgroundColor: colors.navy, borderWidth: 2, borderColor: colors.gold, borderStyle: "dashed", borderRadius: 7, alignItems: "center", justifyContent: "center" },
   tierSmall: { color: colors.cream, fontSize: 10, fontWeight: "800" },
   tierTitle: { color: colors.cream, fontSize: 14, fontWeight: "900", marginVertical: 3 },
