@@ -153,6 +153,17 @@ export async function joinPlan(planId: string, userId: string) {
   if (error) throw error;
 }
 
+export async function leavePlan(planId: string, userId: string) {
+  const { error } = await supabase
+    .from("plan_attendees")
+    .update({ left_at: new Date().toISOString() })
+    .eq("plan_id", planId)
+    .eq("user_id", userId)
+    .is("left_at", null);
+
+  if (error) throw error;
+}
+
 export async function cancelPlan(planId: string, userId: string) {
   const { error } = await supabase
     .from("plans")

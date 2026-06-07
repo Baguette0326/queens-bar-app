@@ -3,8 +3,10 @@ import { supabase } from "../lib/supabase";
 export type PlanNotification = {
   id: string;
   userId: string;
-  planId: string;
-  catalogBarId: string;
+  planId: string | null;
+  catalogBarId: string | null;
+  dmThreadId: string | null;
+  kind: "pinned_bar_plan" | "group_join" | "group_message" | "dm_message" | string;
   title: string;
   body: string;
   readAt: string | null;
@@ -19,8 +21,10 @@ export type PlanNotification = {
 type NotificationRow = {
   id: string;
   user_id: string;
-  plan_id: string;
-  catalog_bar_id: string;
+  plan_id: string | null;
+  catalog_bar_id: string | null;
+  dm_thread_id: string | null;
+  kind: string;
   title: string;
   body: string;
   read_at: string | null;
@@ -40,6 +44,8 @@ function rowToNotification(row: NotificationRow): PlanNotification {
     userId: row.user_id,
     planId: row.plan_id,
     catalogBarId: row.catalog_bar_id,
+    dmThreadId: row.dm_thread_id,
+    kind: row.kind,
     title: row.title,
     body: row.body,
     readAt: row.read_at,
@@ -57,13 +63,42 @@ function rowToNotification(row: NotificationRow): PlanNotification {
 export async function fetchNotifications(userId: string) {
   const { data, error } = await supabase
     .from("plan_notifications")
-    .select("id,user_id,plan_id,catalog_bar_id,title,body,read_at,created_at,plan:plans(location_name,starts_at,status)")
+    .select("id,user_id,plan_id,catalog_bar_id,dm_thread_id,kind,title,body,read_at,created_at,plan:plans(location_name,starts_at,status)")
     .eq("user_id", userId)
     .order("created_at", { ascending: false })
     .limit(50);
 
   if (error) throw error;
   return (data ?? []).map((row) => rowToNotification(row as unknown as NotificationRow));
+}
+
+export async function notifyPlanAttendees(
+  planId: string,
+  senderId: string,
+  kind: "group_join" | "group_message",
+  title: string,
+  body: string
+) {
+  const { error } = await supabase.rpc("notify_plan_attendees", {
+    target_plan_id: planId,
+    sender_user_id: senderId,
+    notification_kind: kind,
+    notification_title: title,
+    notification_body: body
+  });
+
+  if (error) throw error;
+}
+
+export async function notifyDmRecipient(threadId: string, senderId: string, title: string, body: string) {
+  const { error } = await supabase.rpc("notify_dm_recipient", {
+    target_thread_id: threadId,
+    sender_user_id: senderId,
+    notification_title: title,
+    notification_body: body
+  });
+
+  if (error) throw error;
 }
 
 export async function markNotificationRead(notificationId: string, userId: string) {

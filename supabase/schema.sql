@@ -19,7 +19,7 @@ create table public.profiles (
   bio text,
   completion_visibility text not null default 'public',
   xp integer not null default 0,
-  tier text not null default 'Iron',
+  tier text not null default 'Froshling',
   username_changed_at timestamptz,
   accepted_guidelines_at timestamptz,
   suspended_at timestamptz,
@@ -109,14 +109,14 @@ create table public.dm_messages (
 create table public.plan_notifications (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.profiles(id) on delete cascade,
-  plan_id uuid not null references public.plans(id) on delete cascade,
-  catalog_bar_id text not null references public.catalog_bars(id) on delete cascade,
+  plan_id uuid references public.plans(id) on delete cascade,
+  catalog_bar_id text references public.catalog_bars(id) on delete cascade,
+  dm_thread_id uuid references public.dm_threads(id) on delete cascade,
   kind text not null default 'pinned_bar_plan',
   title text not null,
   body text not null,
   read_at timestamptz,
-  created_at timestamptz not null default now(),
-  unique (user_id, plan_id, kind)
+  created_at timestamptz not null default now()
 );
 
 create table public.bar_completions (
@@ -137,10 +137,10 @@ create table public.tier_thresholds (
 
 insert into public.tier_thresholds (tier, min_xp)
 values
-  ('Iron', 0),
-  ('Silver', 1000),
-  ('Gold', 3000),
-  ('Diamond', 6000)
+  ('Froshling', 0),
+  ('Patch Collector', 1000),
+  ('Lore Bearer', 3000),
+  ('Campus Legend', 6000)
 on conflict (tier) do nothing;
 
 alter table public.profiles enable row level security;
@@ -159,6 +159,7 @@ alter table public.tier_thresholds enable row level security;
 grant select, insert, update, delete on public.bar_interests to authenticated;
 grant select, update on public.plan_notifications to authenticated;
 grant select, insert on public.chat_messages to authenticated;
+grant select, insert, update on public.plan_attendees to authenticated;
 grant select on public.dm_threads to authenticated;
 grant select on public.dm_members to authenticated;
 grant select, insert on public.dm_messages to authenticated;
@@ -175,6 +176,9 @@ on public.dm_messages(thread_id, created_at);
 
 create index if not exists plan_notifications_user_created_idx
 on public.plan_notifications (user_id, created_at desc);
+
+create index if not exists plan_notifications_dm_thread_created_idx
+on public.plan_notifications(dm_thread_id, created_at desc);
 
 create or replace function public.is_dm_member(target_thread_id uuid)
 returns boolean
@@ -367,6 +371,94 @@ $$;
 grant execute on function public.get_or_create_dm_thread(uuid) to authenticated;
 grant execute on function public.is_dm_member(uuid) to authenticated;
 
+notify pgrst, 'reload schema';
+
+create or replace function public.notify_plan_attendees(
+  target_plan_id uuid,
+  sender_user_id uuid,
+  notification_kind text,
+  notification_title text,
+  notification_body text
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  target_catalog_bar_id text;
+begin
+  select catalog_bar_id into target_catalog_bar_id
+  from public.plans
+  where id = target_plan_id
+    and status <> 'ended'::public.plan_status;
+
+  if target_catalog_bar_id is null then
+    return;
+  end if;
+
+  if not exists (
+    select 1
+    from public.plan_attendees sender_attendee
+    where sender_attendee.plan_id = target_plan_id
+      and sender_attendee.user_id = sender_user_id
+      and sender_attendee.left_at is null
+  ) then
+    return;
+  end if;
+
+  insert into public.plan_notifications (user_id, plan_id, catalog_bar_id, kind, title, body)
+  select
+    attendee.user_id,
+    target_plan_id,
+    target_catalog_bar_id,
+    notification_kind,
+    notification_title,
+    notification_body
+  from public.plan_attendees attendee
+  where attendee.plan_id = target_plan_id
+    and attendee.left_at is null
+    and attendee.user_id <> sender_user_id;
+end;
+$$;
+
+create or replace function public.notify_dm_recipient(
+  target_thread_id uuid,
+  sender_user_id uuid,
+  notification_title text,
+  notification_body text
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not exists (
+    select 1
+    from public.dm_members sender_member
+    where sender_member.thread_id = target_thread_id
+      and sender_member.user_id = sender_user_id
+  ) then
+    return;
+  end if;
+
+  insert into public.plan_notifications (user_id, dm_thread_id, kind, title, body)
+  select
+    member.user_id,
+    target_thread_id,
+    'dm_message',
+    notification_title,
+    notification_body
+  from public.dm_members member
+  where member.thread_id = target_thread_id
+    and member.user_id <> sender_user_id;
+end;
+$$;
+
+grant execute on function public.notify_plan_attendees(uuid, uuid, text, text, text) to authenticated;
+grant execute on function public.notify_dm_recipient(uuid, uuid, text, text) to authenticated;
+
 create or replace function public.notify_interested_users_for_plan(target_plan_id uuid)
 returns void
 language plpgsql
@@ -390,19 +482,28 @@ begin
   from public.catalog_bars
   where id = target_plan.catalog_bar_id;
 
-  insert into public.plan_notifications (user_id, plan_id, catalog_bar_id, title, body)
+  insert into public.plan_notifications (user_id, plan_id, catalog_bar_id, kind, title, body)
   select
     interest.user_id,
     target_plan.id,
     target_plan.catalog_bar_id,
+    'pinned_bar_plan',
     coalesce(bar_name, 'Pinned bar') || ' has a new plan',
     'Someone is hosting a plan for a bar you pinned.'
   from public.bar_interests interest
   where interest.catalog_bar_id = target_plan.catalog_bar_id
     and interest.notify_on_plan = true
     and interest.user_id <> target_plan.started_by
-  on conflict (user_id, plan_id, kind) do nothing;
+    and not exists (
+      select 1
+      from public.plan_notifications existing
+      where existing.user_id = interest.user_id
+        and existing.plan_id = target_plan.id
+        and existing.kind = 'pinned_bar_plan'
+    );
 end;
 $$;
 
 grant execute on function public.notify_interested_users_for_plan(uuid) to authenticated;
+
+notify pgrst, 'reload schema';

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+﻿import React, { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Pressable,
@@ -45,9 +45,9 @@ import { fetchChatMessages, RemoteChatMessage, sendChatMessage } from "./src/dat
 import { fetchCompletedBarIds, removeCompletedBar, selfCompleteBar } from "./src/data/completionRepository";
 import { fetchDmMessages, fetchDmThreads, getOrCreateDmThread, RemoteDmMessage, RemoteDmThread, sendDmMessage } from "./src/data/dmRepository";
 import { fetchPinnedBarIds, pinBar, unpinBar } from "./src/data/interestRepository";
-import { fetchNotifications, markNotificationRead, PlanNotification } from "./src/data/notificationRepository";
+import { fetchNotifications, markNotificationRead, notifyDmRecipient, notifyPlanAttendees, PlanNotification } from "./src/data/notificationRepository";
 import { fetchLeaderboard, searchProfiles } from "./src/data/peopleRepository";
-import { cancelPlan as cancelRemotePlan, createPlan as createRemotePlan, fetchPlans, joinPlan as joinRemotePlan, RemotePlan } from "./src/data/planRepository";
+import { cancelPlan as cancelRemotePlan, createPlan as createRemotePlan, fetchPlans, joinPlan as joinRemotePlan, leavePlan as leaveRemotePlan, RemotePlan } from "./src/data/planRepository";
 import { createProfile, fetchProfile, getRankFromXp, Profile, roleDbToLabel, updateProfileDetails, updateProfileXp } from "./src/data/profileRepository";
 import { describeSupabaseError } from "./src/data/supabaseError";
 import { supabase } from "./src/lib/supabase";
@@ -124,7 +124,7 @@ const startingPlans: Plan[] = [
     challengeId: "wizard",
     place: "Residence Common Area",
     detail: "main lounge",
-    startsAt: "Tomorrow · 6:30 PM",
+    startsAt: "Tomorrow Â· 6:30 PM",
     status: "upcoming",
     attendees: ["Maya", "Sam", "Owen", "Lee", "Ari", "Noah"],
     cap: 10,
@@ -375,6 +375,18 @@ export default function App() {
   }, [screen, session?.user.id, selectedDmThreadId]);
 
   useEffect(() => {
+    if (!session) return;
+
+    const interval = setInterval(() => {
+      loadNotifications(session.user.id).catch((error) => {
+        console.warn("Failed to refresh notifications.", error);
+      });
+    }, 8000);
+
+    return () => clearInterval(interval);
+  }, [session?.user.id]);
+
+  useEffect(() => {
     let alive = true;
 
     fetchCatalogBars()
@@ -591,12 +603,26 @@ export default function App() {
       console.warn("Failed to mark notification read.", error);
     });
 
+    if (notification.kind === "dm_message" && notification.dmThreadId) {
+      await openDmThread(notification.dmThreadId);
+      return;
+    }
+
+    if (!notification.planId) {
+      go("notifications");
+      return;
+    }
+
     const remotePlans = await loadRemotePlans(session.user.id, notification.planId);
     const targetPlan = remotePlans?.find((plan) => plan.id === notification.planId) ?? plans.find((plan) => plan.id === notification.planId);
     if (targetPlan) {
       setSelectedChallengeId(targetPlan.challengeId);
       setSelectedPlanId(targetPlan.id);
-      go("plan");
+      if (notification.kind === "group_join" || notification.kind === "group_message") {
+        await openChat(targetPlan.id);
+      } else {
+        go("plan");
+      }
       return;
     }
 
@@ -807,6 +833,13 @@ export default function App() {
     try {
       await joinRemotePlan(selectedPlan.id, session.user.id);
       await sendChatMessage(selectedPlan.id, session.user.id, `${username} joined the plan.`);
+      notifyPlanAttendees(
+        selectedPlan.id,
+        session.user.id,
+        "group_join",
+        `${username} joined ${selectedChallenge.name}`,
+        `${username} is in for ${selectedPlan.place}.`
+      ).catch((error) => console.warn("Failed to notify plan attendees.", error));
       const remotePlans = await loadRemotePlans(session.user.id);
       const joinedPlan = remotePlans?.find((plan) => plan.id === selectedPlan.id);
       if (joinedPlan) setSelectedPlanId(joinedPlan.id);
@@ -817,13 +850,68 @@ export default function App() {
     }
   }
 
+  async function runLeavePlan() {
+    if (!session || !selectedPlan) return;
+    const leavingPlanId = selectedPlan.id;
+
+    try {
+      await sendChatMessage(leavingPlanId, session.user.id, `${username} left the plan.`);
+      await leaveRemotePlan(leavingPlanId, session.user.id);
+      setMessages([]);
+      setChatMembersOpen(false);
+      setPlans((current) => {
+        const nextPlans = current.map((plan) => {
+          if (plan.id !== leavingPlanId) return plan;
+          return {
+            ...plan,
+            attendees: plan.attendees.filter((attendee) => attendee !== username),
+            attendeeProfiles: plan.attendeeProfiles?.filter((attendee) => attendee.id !== session.user.id) ?? [],
+            currentUserJoined: false
+          };
+        });
+        return nextPlans;
+      });
+      const remotePlans = await loadRemotePlans(session.user.id);
+      if (remotePlans?.some((plan) => plan.id === leavingPlanId)) {
+        setSelectedPlanId(leavingPlanId);
+      }
+      go("chats");
+    } catch (error) {
+      const message = describeSupabaseError(error, "Could not leave plan. You may need to run supabase/add_leave_plan.sql.");
+      if (Platform.OS === "web") {
+        window.alert(`Leave failed: ${message}`);
+      } else {
+        Alert.alert("Leave failed", message);
+      }
+    }
+  }
+
+  function confirmLeavePlan() {
+    if (!session || !selectedPlan) return;
+
+    if (Platform.OS === "web") {
+      const confirmed = window.confirm("Leave this group chat? You can join the plan again later if it is still open.");
+      if (confirmed) runLeavePlan();
+      return;
+    }
+
+    Alert.alert(
+      "Leave group?",
+      "You will be removed from the attendee list and group chat.",
+      [
+        { text: "Stay", style: "cancel" },
+        { text: "Leave", style: "destructive", onPress: runLeavePlan }
+      ]
+    );
+  }
+
   function confirmJoinPlan() {
     if (!session) {
       go("login");
       return;
     }
 
-    const message = `${selectedChallenge.name}\n${selectedPlan.place} · ${selectedPlan.startsAt}\n\nJoin this plan so the organizer can see you are coming?`;
+    const message = `${selectedChallenge.name}\n${selectedPlan.place} Â· ${selectedPlan.startsAt}\n\nJoin this plan so the organizer can see you are coming?`;
 
     if (Platform.OS === "web") {
       const confirmed = window.confirm(message);
@@ -989,6 +1077,13 @@ export default function App() {
     try {
       const sentMessage = await sendChatMessage(selectedPlan.id, session.user.id, body);
       setMessages((current) => [...current, sentMessage]);
+      notifyPlanAttendees(
+        selectedPlan.id,
+        session.user.id,
+        "group_message",
+        `${username} messaged ${selectedChallenge.name}`,
+        body.length > 120 ? `${body.slice(0, 117)}...` : body
+      ).catch((error) => console.warn("Failed to notify plan attendees.", error));
       setChatStatus("idle");
     } catch (error) {
       setMessage(body);
@@ -1016,6 +1111,12 @@ export default function App() {
     try {
       const sentMessage = await sendDmMessage(selectedDmThreadId, session.user.id, body);
       setDmMessages((current) => [...current, sentMessage]);
+      notifyDmRecipient(
+        selectedDmThreadId,
+        session.user.id,
+        `${username} sent you a DM`,
+        body.length > 120 ? `${body.slice(0, 117)}...` : body
+      ).catch((error) => console.warn("Failed to notify DM recipient.", error));
       loadDmThreads().catch((error) => console.warn("Failed to refresh DM inbox.", error));
       setDmStatus("idle");
     } catch (error) {
@@ -1220,7 +1321,7 @@ export default function App() {
               onChange={(value) => setCompletionFilter(value as "All" | "Completed" | "Not completed")}
             />
             <Text style={styles.catalogCount}>
-              Showing {visibleChallenges.length} of {filteredChallenges.length} bars · {catalogStatusLabel(catalogStatus)}
+              Showing {visibleChallenges.length} of {filteredChallenges.length} bars Â· {catalogStatusLabel(catalogStatus)}
             </Text>
             {(browseCategory !== "All" || difficulty !== "All" || completionFilter !== "All" || query) && (
               <Pressable
@@ -1312,7 +1413,7 @@ export default function App() {
                 {matchingLivePlans.slice(0, 2).map((plan) => (
                   <Pressable key={plan.id} onPress={() => openPlan(plan.id)} style={styles.existingPlanRow}>
                     <Text style={styles.existingPlanRowTitle}>{plan.place}</Text>
-                    <Text style={styles.existingPlanRowMeta}>{plan.startsAt} · {plan.attendees.length}/{plan.cap ?? "∞"}</Text>
+                    <Text style={styles.existingPlanRowMeta}>{plan.startsAt} Â· {plan.attendees.length}/{plan.cap ?? "âˆž"}</Text>
                   </Pressable>
                 ))}
               </View>
@@ -1389,7 +1490,7 @@ export default function App() {
             <ChallengeHero challenge={selectedChallenge} compact />
             <PlanInfoRow icon={<CalendarDays color={colors.ink} size={18} />} label="TIME" value={selectedPlan.startsAt} />
             <PlanInfoRow icon={<MapPin color={colors.ink} size={18} />} label="LOCATION" value={`${selectedPlan.place}\n${selectedPlan.detail}`} />
-            <PlanInfoRow icon={<Users color={colors.ink} size={18} />} label="ATTENDEES" value={`${selectedPlan.attendees.length} / ${selectedPlan.cap ?? "∞"}`} />
+            <PlanInfoRow icon={<Users color={colors.ink} size={18} />} label="ATTENDEES" value={`${selectedPlan.attendees.length} / ${selectedPlan.cap ?? "âˆž"}`} />
             <Pressable
               onPress={() => selectedPlan.startedById && openPublicProfileById(selectedPlan.startedById, "plan")}
               disabled={!selectedPlan.startedById}
@@ -1398,10 +1499,11 @@ export default function App() {
             </Pressable>
             <PlanInfoRow icon={<BookOpen color={colors.ink} size={18} />} label="NOTE" value={selectedPlan.note} />
             <PatchButton
-              label="I'M IN!"
+              label={selectedPlan.currentUserJoined || selectedPlan.attendees.includes(username) ? "OPEN GROUP CHAT" : "I'M IN!"}
               tone="green"
               onPress={selectedPlan.currentUserJoined || selectedPlan.attendees.includes(username) ? () => openChat(selectedPlan.id) : confirmJoinPlan}
             />
+            {(selectedPlan.currentUserJoined || selectedPlan.attendees.includes(username)) && !currentUserStartedPlan && <OutlineButton label="LEAVE GROUP" onPress={confirmLeavePlan} />}
             {currentUserStartedPlan && <OutlineButton label="CANCEL PLAN" onPress={cancelPlan} />}
           </DetailScreen>
         )}
@@ -1430,7 +1532,7 @@ export default function App() {
                 </Pressable>
                 <View style={styles.chatHeaderTitleBlock}>
                   <Text style={styles.chatTitle}>{selectedChallenge.name.toUpperCase()}</Text>
-                  <Text style={styles.chatStatus}>● Plan Chat · {selectedPlan.attendees.length} Going</Text>
+                  <Text style={styles.chatStatus}>â— Plan Chat Â· {selectedPlan.attendees.length} Going</Text>
                 </View>
                 <Pressable
                   accessibilityLabel="Show chat members"
@@ -1440,6 +1542,13 @@ export default function App() {
                   <Users color={colors.ink} size={19} />
                 </Pressable>
               </View>
+              <Pressable
+                accessibilityLabel="Leave group chat"
+                onPress={confirmLeavePlan}
+                style={({ pressed }) => [styles.chatLeaveButton, pressedScale(pressed)]}
+              >
+                <Text style={styles.chatLeaveButtonText}>LEAVE GROUP</Text>
+              </Pressable>
             </View>
             {chatMembersOpen && (
               <View style={styles.chatMembersOverlay}>
@@ -1646,10 +1755,10 @@ function plansStatusLabel(status: "local" | "loading" | "remote" | "error") {
 
 function getRankProgress(xp: number) {
   const ranks = [
-    { name: "Iron", min: 0 },
-    { name: "Silver", min: 1000 },
-    { name: "Gold", min: 3000 },
-    { name: "Diamond", min: 6000 }
+    { name: "Froshling", min: 0 },
+    { name: "Patch Collector", min: 1000 },
+    { name: "Lore Bearer", min: 3000 },
+    { name: "Campus Legend", min: 6000 }
   ];
   const currentIndex = Math.max(0, ranks.findIndex((rank, index) => xp >= rank.min && (!ranks[index + 1] || xp < ranks[index + 1].min)));
   const current = ranks[currentIndex];
@@ -1674,7 +1783,7 @@ function formatCreateTime(date: Date) {
 
 function formatCreatedPlanTime(startsAt: Date) {
   const time = startsAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  return `${startsAt.toLocaleDateString([], { month: "short", day: "numeric" })} · ${time}`;
+  return `${startsAt.toLocaleDateString([], { month: "short", day: "numeric" })} Â· ${time}`;
 }
 
 function parseCreateTime(value: string) {
@@ -1831,19 +1940,21 @@ function NotificationRow({
   onPress: () => void;
 }) {
   const unread = !notification.readAt;
+  const isDm = notification.kind === "dm_message";
   const time = notification.plan?.startsAt
     ? new Date(notification.plan.startsAt).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
-    : "Plan details unavailable";
+    : new Date(notification.createdAt).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  const meta = isDm ? "Direct message" : notification.plan?.locationName ?? challenge?.name ?? "Group chat";
 
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [styles.notificationRow, unread && styles.notificationRowUnread, pressedScale(pressed)]}>
       <View style={styles.notificationIcon}>
-        <AvatarIcon avatar={challenge?.icon ?? "star"} color={unread ? colors.gold : colors.ink} size={22} />
+        <AvatarIcon avatar={isDm ? "crown" : challenge?.icon ?? "star"} color={unread ? colors.gold : colors.ink} size={22} />
       </View>
       <View style={styles.flex}>
         <Text style={styles.notificationTitle}>{notification.title}</Text>
         <Text style={styles.notificationBody}>{notification.body}</Text>
-        <Text style={styles.notificationMeta}>{notification.plan?.locationName ?? challenge?.name ?? "Pinned bar"} · {time}</Text>
+        <Text style={styles.notificationMeta}>{meta} - {time}</Text>
       </View>
       {unread && <View style={styles.unreadDot} />}
     </Pressable>
@@ -1881,7 +1992,7 @@ function PeopleRow({ profile, onPress }: { profile: Profile; onPress: () => void
       <View style={styles.flex}>
         <Text style={styles.peopleName}>{profile.username}</Text>
         <Text style={styles.peopleMeta}>
-          {[roleDbToLabel(profile.role), profile.year_label, profile.program].filter(Boolean).join(" · ")}
+          {[roleDbToLabel(profile.role), profile.year_label, profile.program].filter(Boolean).join(" Â· ")}
         </Text>
       </View>
       <View style={styles.peopleTier}>
@@ -1898,7 +2009,7 @@ function LeaderboardRow({ profile, place, onPress }: { profile: Profile; place: 
       <View style={styles.peopleAvatar}><AvatarIcon avatar={profile.avatar} color={colors.gold} size={24} /></View>
       <View style={styles.flex}>
         <Text style={styles.peopleName}>{profile.username}</Text>
-        <Text style={styles.peopleMeta}>{getRankFromXp(profile.xp)} · {profile.xp.toLocaleString()} XP</Text>
+        <Text style={styles.peopleMeta}>{getRankFromXp(profile.xp)} Â· {profile.xp.toLocaleString()} XP</Text>
       </View>
       <Text style={styles.peopleTierText}>{getRankFromXp(profile.xp)}</Text>
     </Pressable>
@@ -1952,7 +2063,7 @@ function ChallengePatch({ challenge, pinned, completed, onPress }: { challenge: 
       </View>
       <View style={styles.challengePatchFooter}><Text style={[styles.challengePatchMeta, { color: tone.text }]}>{challenge.difficulty}</Text><Text style={[styles.challengePatchMeta, { color: tone.text }]}>{challenge.xp} XP</Text></View>
       {(challenge.interested > 0 || challenge.upcoming > 0) && (
-        <View style={styles.challengePatchStats}><Text style={{ color: tone.text }}>♟ {challenge.interested}</Text><Text style={{ color: tone.text }}>▣ {challenge.upcoming}</Text></View>
+        <View style={styles.challengePatchStats}><Text style={{ color: tone.text }}>â™Ÿ {challenge.interested}</Text><Text style={{ color: tone.text }}>â–£ {challenge.upcoming}</Text></View>
       )}
     </Pressable>
   );
@@ -1981,7 +2092,7 @@ function PlanPatch({ plan, onPress, catalog }: { plan: Plan; onPress: () => void
       </View>
       <View style={styles.planPatchSide}>
         {plan.status === "ongoing" && <Text style={styles.livePill}>LIVE</Text>}
-        <Text style={[styles.planPatchMeta, { color: tone.text }]}>{plan.attendees.length}/{plan.cap ?? "∞"}</Text>
+        <Text style={[styles.planPatchMeta, { color: tone.text }]}>{plan.attendees.length}/{plan.cap ?? "âˆž"}</Text>
       </View>
     </Pressable>
   );
@@ -1994,14 +2105,14 @@ function ChallengeHero({ challenge, compact }: { challenge: Challenge; compact?:
       <AvatarIcon avatar={challenge.icon} color={tone.text} size={compact ? 42 : 56} />
       <View style={styles.heroPatchBody}>
         <Text style={[styles.heroPatchTitle, { color: tone.text }]}>{challenge.name.toUpperCase()}</Text>
-        <Text style={[styles.heroPatchMeta, { color: tone.text }]}>{challenge.difficulty} · {challenge.xp} XP</Text>
+        <Text style={[styles.heroPatchMeta, { color: tone.text }]}>{challenge.difficulty} Â· {challenge.xp} XP</Text>
       </View>
     </View>
   );
 }
 
 function SelectedChallenge({ challenge }: { challenge: Challenge }) {
-  return <View style={styles.selectedChallenge}><AvatarIcon avatar={challenge.icon} color={colors.gold} size={26} /><View style={styles.flex}><Text style={styles.selectedChallengeTitle}>{challenge.name.toUpperCase()}</Text><Text style={styles.selectedChallengeMeta}>{challenge.difficulty} · {challenge.xp} XP</Text></View><Check color={colors.cream} size={16} style={styles.selectedCheck} /></View>;
+  return <View style={styles.selectedChallenge}><AvatarIcon avatar={challenge.icon} color={colors.gold} size={26} /><View style={styles.flex}><Text style={styles.selectedChallengeTitle}>{challenge.name.toUpperCase()}</Text><Text style={styles.selectedChallengeMeta}>{challenge.difficulty} Â· {challenge.xp} XP</Text></View><Check color={colors.cream} size={16} style={styles.selectedCheck} /></View>;
 }
 
 function ChallengePicker({
@@ -2023,7 +2134,7 @@ function ChallengePicker({
         <AvatarIcon avatar={selectedChallenge.icon} color={colors.gold} size={26} />
         <View style={styles.flex}>
           <Text style={styles.selectedChallengeTitle}>{selectedChallenge.name.toUpperCase()}</Text>
-          <Text style={styles.selectedChallengeMeta}>{selectedChallenge.difficulty} · {selectedChallenge.xp} XP</Text>
+          <Text style={styles.selectedChallengeMeta}>{selectedChallenge.difficulty} Â· {selectedChallenge.xp} XP</Text>
         </View>
         <ChevronDown color={colors.ink} size={20} />
       </Pressable>
@@ -2043,7 +2154,7 @@ function ChallengePicker({
                     {challenge.name}
                   </Text>
                   <Text style={[styles.challengePickerOptionMeta, selected && styles.challengePickerOptionMetaActive]}>
-                    {challenge.difficulty} · {challenge.xp} XP
+                    {challenge.difficulty} Â· {challenge.xp} XP
                   </Text>
                 </View>
                 {selected && <Check color={colors.cream} size={16} />}
@@ -2096,7 +2207,7 @@ function CompletedBarRow({ challenge, onPress }: { challenge: Challenge; onPress
       <View style={styles.completedBarIcon}><Check color={colors.cream} size={15} /></View>
       <View style={styles.flex}>
         <Text style={styles.completedBarTitle}>{challenge.name}</Text>
-        <Text style={styles.completedBarMeta}>{challenge.difficulty} · {challenge.xp} XP</Text>
+        <Text style={styles.completedBarMeta}>{challenge.difficulty} Â· {challenge.xp} XP</Text>
       </View>
       <Text style={styles.collectionValue}>Open</Text>
     </Pressable>
@@ -2175,7 +2286,7 @@ const styles = StyleSheet.create({
   notificationCount: { position: "absolute", top: 0, right: 0, minWidth: 16, height: 16, borderRadius: 8, backgroundColor: colors.red, borderWidth: 1, borderColor: colors.paperLight, alignItems: "center", justifyContent: "center", paddingHorizontal: 3 },
   notificationCountText: { color: colors.cream, fontSize: 9, fontWeight: "900" },
   notificationRow: { flexDirection: "row", alignItems: "flex-start", gap: 10, borderWidth: 1, borderColor: colors.line, borderRadius: 8, backgroundColor: colors.paperLight, padding: 11, marginBottom: 9 },
-  notificationRowUnread: { borderColor: colors.gold, backgroundColor: colors.cream },
+  notificationRowUnread: { borderColor: colors.gold, backgroundColor: "#182B45" },
   notificationIcon: { width: 34, height: 34, borderRadius: 17, borderWidth: 1, borderColor: colors.gold, alignItems: "center", justifyContent: "center", backgroundColor: colors.paper },
   notificationTitle: { color: colors.ink, fontSize: 13, fontWeight: "900" },
   notificationBody: { color: colors.ink, fontSize: 12, lineHeight: 17, marginTop: 3 },
@@ -2272,17 +2383,19 @@ const styles = StyleSheet.create({
   chatTitle: { color: colors.ink, fontSize: 18, fontWeight: "900" },
   chatStatus: { color: colors.green, fontSize: 11, marginTop: 2 },
   chatMembersButton: { width: 40, height: 40, alignItems: "center", justifyContent: "center" },
+  chatLeaveButton: { alignSelf: "center", marginTop: 8, borderWidth: 1, borderColor: colors.line, borderRadius: 999, backgroundColor: colors.paperLight, paddingHorizontal: 12, paddingVertical: 6 },
+  chatLeaveButtonText: { color: colors.muted, fontSize: 10, fontWeight: "900" },
   chatMembersOverlay: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, zIndex: 20, flexDirection: "row", justifyContent: "flex-end" },
   chatMembersBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.38)" },
-  chatMembersDrawer: { width: 230, backgroundColor: colors.paperLight, borderLeftWidth: 1, borderLeftColor: colors.line, padding: 14 },
+  chatMembersDrawer: { width: 260, backgroundColor: "#0D1A2B", borderLeftWidth: 1, borderLeftColor: colors.gold, padding: 14 },
   chatMembersDrawerHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   chatMembersTitle: { color: colors.ink, fontSize: 14, fontWeight: "900" },
   chatMembersClose: { width: 36, height: 36, alignItems: "center", justifyContent: "center" },
   chatMembersCloseText: { color: colors.ink, fontSize: 14, fontWeight: "900" },
-  chatMembersCount: { color: colors.muted, fontSize: 11, fontWeight: "800", marginTop: 2, marginBottom: 12 },
-  chatMemberRow: { flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 1, borderColor: colors.line, borderRadius: 8, backgroundColor: colors.cream, padding: 8, marginBottom: 7 },
-  chatMemberAvatar: { width: 26, height: 26, borderRadius: 13, backgroundColor: colors.gold, alignItems: "center", justifyContent: "center" },
-  chatMemberRowText: { color: colors.ink, fontSize: 12, fontWeight: "900" },
+  chatMembersCount: { color: colors.ink, fontSize: 11, fontWeight: "800", marginTop: 2, marginBottom: 12 },
+  chatMemberRow: { minHeight: 44, flexDirection: "row", alignItems: "center", gap: 9, borderWidth: 1, borderColor: "#4F6F96", borderRadius: 8, backgroundColor: "#172943", paddingHorizontal: 10, paddingVertical: 8, marginBottom: 8 },
+  chatMemberAvatar: { width: 28, height: 28, borderRadius: 14, backgroundColor: colors.gold, alignItems: "center", justifyContent: "center" },
+  chatMemberRowText: { color: colors.ink, fontSize: 13, fontWeight: "900" },
   chatList: { padding: 14, paddingBottom: 82 },
   systemMessage: { alignSelf: "center", backgroundColor: colors.cream, borderWidth: 1, borderColor: colors.line, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 5, marginBottom: 11 },
   systemMessageText: { color: colors.muted, fontSize: 11, fontWeight: "800" },

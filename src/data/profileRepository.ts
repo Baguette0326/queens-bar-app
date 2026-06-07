@@ -45,10 +45,10 @@ function withBio(profile: Omit<Profile, "bio"> & { bio?: string | null }) {
 }
 
 export function getRankFromXp(xp: number) {
-  if (xp >= 6000) return "Diamond";
-  if (xp >= 3000) return "Gold";
-  if (xp >= 1000) return "Silver";
-  return "Iron";
+  if (xp >= 6000) return "Campus Legend";
+  if (xp >= 3000) return "Lore Bearer";
+  if (xp >= 1000) return "Patch Collector";
+  return "Froshling";
 }
 
 export function roleLabelToDb(roleLabel: string): Profile["role"] {

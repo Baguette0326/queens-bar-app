@@ -9,14 +9,13 @@ create table if not exists public.bar_interests (
 create table if not exists public.plan_notifications (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.profiles(id) on delete cascade,
-  plan_id uuid not null references public.plans(id) on delete cascade,
-  catalog_bar_id text not null references public.catalog_bars(id) on delete cascade,
+  plan_id uuid references public.plans(id) on delete cascade,
+  catalog_bar_id text references public.catalog_bars(id) on delete cascade,
   kind text not null default 'pinned_bar_plan',
   title text not null,
   body text not null,
   read_at timestamptz,
-  created_at timestamptz not null default now(),
-  unique (user_id, plan_id, kind)
+  created_at timestamptz not null default now()
 );
 
 alter table public.bar_interests enable row level security;
@@ -82,18 +81,25 @@ begin
   from public.catalog_bars
   where id = target_plan.catalog_bar_id;
 
-  insert into public.plan_notifications (user_id, plan_id, catalog_bar_id, title, body)
+  insert into public.plan_notifications (user_id, plan_id, catalog_bar_id, kind, title, body)
   select
     interest.user_id,
     target_plan.id,
     target_plan.catalog_bar_id,
+    'pinned_bar_plan',
     coalesce(bar_name, 'Pinned bar') || ' has a new plan',
     'Someone is hosting a plan for a bar you pinned.'
   from public.bar_interests interest
   where interest.catalog_bar_id = target_plan.catalog_bar_id
     and interest.notify_on_plan = true
     and interest.user_id <> target_plan.started_by
-  on conflict (user_id, plan_id, kind) do nothing;
+    and not exists (
+      select 1
+      from public.plan_notifications existing
+      where existing.user_id = interest.user_id
+        and existing.plan_id = target_plan.id
+        and existing.kind = 'pinned_bar_plan'
+    );
 end;
 $$;
 

@@ -111,3 +111,5 @@ $$;
 
 grant execute on function public.get_or_create_dm_thread(uuid) to authenticated;
 grant execute on function public.is_dm_member(uuid) to authenticated;
+
+notify pgrst, 'reload schema';
