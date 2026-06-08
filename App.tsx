@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from "react";
+﻿import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Pressable,
@@ -46,7 +46,7 @@ import { fetchCompletedBarIds, removeCompletedBar, selfCompleteBar } from "./src
 import { fetchDmMessages, fetchDmThreads, getOrCreateDmThread, RemoteDmMessage, RemoteDmThread, sendDmMessage } from "./src/data/dmRepository";
 import { acceptFriendRequest, cancelFriendRequest, declineFriendRequest, fetchFriends, fetchFriendState, fetchIncomingFriendRequests, FriendRequest, FriendStatus, removeFriend, sendFriendRequest } from "./src/data/friendRepository";
 import { fetchPinnedBarIds, pinBar, unpinBar } from "./src/data/interestRepository";
-import { fetchNotifications, markNotificationRead, notifyDmRecipient, notifyFriendRequest, notifyPlanAttendees, notifyPlanInvite, PlanNotification } from "./src/data/notificationRepository";
+import { fetchNotifications, markNotificationRead, notifyDmRecipient, notifyFriendRequest, notifyPlanAttendees, notifyPlanCanceled, notifyPlanInvite, PlanNotification } from "./src/data/notificationRepository";
 import { fetchLeaderboard, searchProfiles } from "./src/data/peopleRepository";
 import { cancelPlan as cancelRemotePlan, createPlan as createRemotePlan, fetchPlans, joinPlan as joinRemotePlan, leavePlan as leaveRemotePlan, RemotePlan } from "./src/data/planRepository";
 import { createProfile, fetchProfile, getRankFromXp, Profile, roleDbToLabel, updateProfileDetails, updateProfileXp } from "./src/data/profileRepository";
@@ -55,6 +55,30 @@ import { supabase } from "./src/lib/supabase";
 
 type Screen = "login" | "onboarding" | "discover" | "catalog" | "challenge" | "create" | "plan" | "chats" | "chat" | "dmThread" | "profile" | "notifications" | "completed" | "people" | "publicProfile" | "leaderboard";
 type CreatePlanDay = "Today" | "Tomorrow";
+
+const LAST_SCREEN_STORAGE_KEY = "ritual:lastScreen";
+const RESTORABLE_SCREENS = new Set<Screen>(["discover", "catalog", "chats", "profile", "notifications", "completed", "people", "leaderboard"]);
+
+function readStoredScreen(): Screen | null {
+  if (Platform.OS !== "web") return null;
+
+  try {
+    const stored = window.sessionStorage.getItem(LAST_SCREEN_STORAGE_KEY) as Screen | null;
+    return stored && RESTORABLE_SCREENS.has(stored) ? stored : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredScreen(screen: Screen) {
+  if (Platform.OS !== "web" || !RESTORABLE_SCREENS.has(screen)) return;
+
+  try {
+    window.sessionStorage.setItem(LAST_SCREEN_STORAGE_KEY, screen);
+  } catch {
+    // Ignore storage failures; navigation still works without persistence.
+  }
+}
 
 type Plan = {
   id: string;
@@ -136,6 +160,7 @@ const startingPlans: Plan[] = [
 ];
 
 export default function App() {
+  const hasRoutedFromAuthRef = useRef(false);
   const [screen, setScreen] = useState<Screen>("login");
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -449,11 +474,12 @@ export default function App() {
   useEffect(() => {
     let alive = true;
 
-    async function applySession(nextSession: Session | null) {
+    async function applySession(nextSession: Session | null, options: { routeAfterLoad?: boolean } = {}) {
       if (!alive) return;
       setSession(nextSession);
 
       if (!nextSession) {
+        hasRoutedFromAuthRef.current = false;
         setProfile(null);
         setAuthStatus("ready");
         setScreen("login");
@@ -472,7 +498,10 @@ export default function App() {
           setDraftBio(nextProfile.bio ?? "");
           setRole(roleDbToLabel(nextProfile.role));
           setXp(nextProfile.xp);
-          setScreen("discover");
+          if (options.routeAfterLoad && !hasRoutedFromAuthRef.current) {
+            hasRoutedFromAuthRef.current = true;
+            setScreen(readStoredScreen() ?? "discover");
+          }
           loadRemotePlans(nextSession.user.id);
           loadNotifications(nextSession.user.id);
           loadFriendsData(nextSession.user.id);
@@ -491,25 +520,37 @@ export default function App() {
               console.warn("Failed to load pinned bars.", error);
             });
         } else {
-          setScreen("onboarding");
+          if (options.routeAfterLoad && !hasRoutedFromAuthRef.current) {
+            hasRoutedFromAuthRef.current = true;
+            setScreen("onboarding");
+          }
         }
       } catch (error) {
         console.warn("Failed to load profile.", error);
         if (alive) {
           setAuthStatus("ready");
-          setScreen("onboarding");
+          if (options.routeAfterLoad && !hasRoutedFromAuthRef.current) {
+            hasRoutedFromAuthRef.current = true;
+            setScreen("onboarding");
+          }
         }
       }
     }
 
-    supabase.auth.getSession().then(({ data }) => applySession(data.session));
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => applySession(nextSession));
+    supabase.auth.getSession().then(({ data }) => applySession(data.session, { routeAfterLoad: true }));
+    const { data: listener } = supabase.auth.onAuthStateChange((event, nextSession) =>
+      applySession(nextSession, { routeAfterLoad: event === "SIGNED_IN" || event === "INITIAL_SESSION" })
+    );
 
     return () => {
       alive = false;
       listener.subscription.unsubscribe();
     };
   }, []);
+
+  useEffect(() => {
+    writeStoredScreen(screen);
+  }, [screen]);
 
   useEffect(() => {
     if (screen !== "people" || !session) return;
@@ -707,6 +748,11 @@ export default function App() {
   const completedChallenges = catalog.filter((challenge) => completedBarIds.includes(challenge.id));
   const publicCompletedChallenges = catalog.filter((challenge) => publicCompletedBarIds.includes(challenge.id));
   const joinedPlans = plans.filter((plan) => plan.currentUserJoined || plan.attendees.includes(username));
+  const selectedPlanAttendeeIds = new Set(selectedPlan?.attendeeProfiles?.map((attendee) => attendee.id) ?? []);
+  const selectedPlanAttendeeNames = new Set(selectedPlan?.attendees ?? []);
+  const inviteableFriends = friends.filter(
+    (friend) => !selectedPlanAttendeeIds.has(friend.id) && !selectedPlanAttendeeNames.has(friend.username)
+  );
   const tier = getRankFromXp(xp);
   const rankProgress = getRankProgress(xp);
 
@@ -791,6 +837,11 @@ export default function App() {
     if (notification.kind === "friend_request") {
       await loadFriendsData(session.user.id);
       go("people");
+      return;
+    }
+
+    if (notification.kind === "plan_canceled") {
+      go("notifications");
       return;
     }
 
@@ -1211,6 +1262,12 @@ export default function App() {
       const canceledPlanId = selectedPlan.id;
 
       try {
+        await notifyPlanCanceled(
+          canceledPlanId,
+          session.user.id,
+          `${selectedChallenge.name} was canceled`,
+          `${selectedPlan.place} - ${selectedPlan.startsAt}`
+        );
         await cancelRemotePlan(canceledPlanId, session.user.id);
         setPlans((current) => {
           const nextPlans = current.filter((plan) => plan.id !== canceledPlanId);
@@ -1736,9 +1793,10 @@ export default function App() {
             <PlanInfoRow icon={<BookOpen color={colors.ink} size={18} />} label="NOTE" value={selectedPlan.note} />
             {(selectedPlan.currentUserJoined || selectedPlan.attendees.includes(username)) && (
               <>
-                <SectionHeader title="INVITE FRIENDS" action={friends.length ? `${friends.length}` : undefined} />
+                <SectionHeader title="INVITE FRIENDS" action={inviteableFriends.length ? `${inviteableFriends.length}` : undefined} />
                 {friends.length === 0 && <Text style={styles.emptyState}>Add friends to invite them to plans.</Text>}
-                {friends.map((friend) => (
+                {friends.length > 0 && inviteableFriends.length === 0 && <Text style={styles.emptyState}>All of your friends are already in this plan.</Text>}
+                {inviteableFriends.map((friend) => (
                   <FriendInviteRow
                     key={friend.id}
                     friend={friend}
@@ -2196,10 +2254,11 @@ function NotificationRow({
   const isDm = notification.kind === "dm_message";
   const isFriendRequest = notification.kind === "friend_request";
   const isPlanInvite = notification.kind === "plan_invite";
+  const isPlanCanceled = notification.kind === "plan_canceled";
   const time = notification.plan?.startsAt
     ? new Date(notification.plan.startsAt).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
     : new Date(notification.createdAt).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-  const meta = isDm ? "Direct message" : isFriendRequest ? "Friend request" : isPlanInvite ? "Plan invite" : notification.plan?.locationName ?? challenge?.name ?? "Group chat";
+  const meta = isDm ? "Direct message" : isFriendRequest ? "Friend request" : isPlanInvite ? "Plan invite" : isPlanCanceled ? "Canceled plan" : notification.plan?.locationName ?? challenge?.name ?? "Group chat";
 
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [styles.notificationRow, unread && styles.notificationRowUnread, pressedScale(pressed)]}>

@@ -619,8 +619,51 @@ begin
 end;
 $$;
 
+create or replace function public.notify_plan_canceled(
+  target_plan_id uuid,
+  sender_user_id uuid,
+  notification_title text,
+  notification_body text
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  target_catalog_bar_id text;
+begin
+  if auth.uid() <> sender_user_id then
+    return;
+  end if;
+
+  select catalog_bar_id into target_catalog_bar_id
+  from public.plans
+  where id = target_plan_id
+    and started_by = sender_user_id;
+
+  if target_catalog_bar_id is null then
+    return;
+  end if;
+
+  insert into public.plan_notifications (user_id, plan_id, catalog_bar_id, kind, title, body)
+  select
+    attendee.user_id,
+    target_plan_id,
+    target_catalog_bar_id,
+    'plan_canceled',
+    notification_title,
+    notification_body
+  from public.plan_attendees attendee
+  where attendee.plan_id = target_plan_id
+    and attendee.left_at is null
+    and attendee.user_id <> sender_user_id;
+end;
+$$;
+
 grant execute on function public.notify_friend_request(uuid, uuid, text, text) to authenticated;
 grant execute on function public.notify_plan_invite(uuid, uuid, uuid, text, text) to authenticated;
+grant execute on function public.notify_plan_canceled(uuid, uuid, text, text) to authenticated;
 
 create or replace function public.notify_interested_users_for_plan(target_plan_id uuid)
 returns void
