@@ -1,4 +1,4 @@
-# Queen's Bars MVP UI Prompt
+# Ritual MVP UI Prompt
 
 ## Product Summary
 
@@ -362,7 +362,7 @@ First real data milestone:
 Use this prompt to ask GPT or a UI tool for potential app screens:
 
 ```text
-Design multiple mobile iOS UI concepts for an app called Queens Bars.
+Design multiple mobile iOS UI concepts for an app called Ritual.
 
 The app helps Queen's students discover, organize, join, chat about, and complete Queen's Engineering bar/challenge/tradition meetups. It is not an official university app and should not feel like a dating app or generic drinking app. It should feel campus-native, playful, social, energetic, and trustworthy.
 

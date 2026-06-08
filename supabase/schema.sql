@@ -1,4 +1,4 @@
--- Queens Bars MVP schema
+-- Ritual MVP schema
 -- Run this in Supabase SQL Editor after reviewing it.
 
 create extension if not exists "pgcrypto";
@@ -54,6 +54,7 @@ create table public.plans (
   ends_at timestamptz not null,
   cap integer,
   note text,
+  visibility text not null default 'public' check (visibility in ('public', 'friends')),
   status public.plan_status not null default 'upcoming',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -106,6 +107,16 @@ create table public.dm_messages (
   created_at timestamptz not null default now()
 );
 
+create table public.friend_requests (
+  id uuid primary key default gen_random_uuid(),
+  requester_id uuid not null references public.profiles(id) on delete cascade,
+  addressee_id uuid not null references public.profiles(id) on delete cascade,
+  status text not null default 'pending' check (status in ('pending', 'accepted', 'declined')),
+  created_at timestamptz not null default now(),
+  responded_at timestamptz,
+  check (requester_id <> addressee_id)
+);
+
 create table public.plan_notifications (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.profiles(id) on delete cascade,
@@ -152,6 +163,7 @@ alter table public.chat_messages enable row level security;
 alter table public.dm_threads enable row level security;
 alter table public.dm_members enable row level security;
 alter table public.dm_messages enable row level security;
+alter table public.friend_requests enable row level security;
 alter table public.plan_notifications enable row level security;
 alter table public.bar_completions enable row level security;
 alter table public.tier_thresholds enable row level security;
@@ -163,6 +175,7 @@ grant select, insert, update on public.plan_attendees to authenticated;
 grant select on public.dm_threads to authenticated;
 grant select on public.dm_members to authenticated;
 grant select, insert on public.dm_messages to authenticated;
+grant select, insert, update, delete on public.friend_requests to authenticated;
 grant select, insert, delete on public.bar_completions to authenticated;
 
 create index if not exists chat_messages_plan_created_idx
@@ -173,6 +186,16 @@ on public.dm_members(user_id);
 
 create index if not exists dm_messages_thread_created_idx
 on public.dm_messages(thread_id, created_at);
+
+create unique index if not exists friend_requests_pair_unique_idx
+on public.friend_requests (
+  least(requester_id, addressee_id),
+  greatest(requester_id, addressee_id)
+)
+where status in ('pending', 'accepted');
+
+create index if not exists friend_requests_addressee_status_idx
+on public.friend_requests(addressee_id, status, created_at desc);
 
 create index if not exists plan_notifications_user_created_idx
 on public.plan_notifications (user_id, created_at desc);
@@ -210,9 +233,44 @@ create policy "published catalog bars are readable"
 on public.catalog_bars for select
 using (published = true);
 
+create or replace function public.can_view_plan(target_plan_id uuid)
+returns boolean
+language sql
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.plans visible_plan
+    where visible_plan.id = target_plan_id
+      and (
+        visible_plan.visibility = 'public'
+        or auth.uid() = visible_plan.started_by
+        or exists (
+          select 1
+          from public.plan_attendees attendee
+          where attendee.plan_id = visible_plan.id
+            and attendee.user_id = auth.uid()
+            and attendee.left_at is null
+        )
+        or exists (
+          select 1
+          from public.friend_requests friendship
+          where friendship.status = 'accepted'
+            and (
+              (friendship.requester_id = auth.uid() and friendship.addressee_id = visible_plan.started_by)
+              or (friendship.addressee_id = auth.uid() and friendship.requester_id = visible_plan.started_by)
+            )
+        )
+      )
+  );
+$$;
+
+grant execute on function public.can_view_plan(uuid) to authenticated;
+
 create policy "plans are readable"
 on public.plans for select
-using (true);
+using (public.can_view_plan(id));
 
 create policy "authenticated users can create plans"
 on public.plans for insert
@@ -230,7 +288,7 @@ with check (
 
 create policy "attendees are readable"
 on public.plan_attendees for select
-using (true);
+using (public.can_view_plan(plan_id));
 
 create policy "users can join as themselves"
 on public.plan_attendees for insert
@@ -300,6 +358,30 @@ with check (
   and public.is_dm_member(thread_id)
 );
 
+create policy "users can read own friend requests"
+on public.friend_requests for select
+using (auth.uid() = requester_id or auth.uid() = addressee_id);
+
+create policy "users can send friend requests"
+on public.friend_requests for insert
+with check (
+  auth.uid() = requester_id
+  and requester_id <> addressee_id
+  and status = 'pending'
+);
+
+create policy "users can respond to incoming friend requests"
+on public.friend_requests for update
+using (auth.uid() = addressee_id)
+with check (auth.uid() = addressee_id);
+
+create policy "users can remove own friendships"
+on public.friend_requests for delete
+using (
+  (status = 'accepted' and (auth.uid() = requester_id or auth.uid() = addressee_id))
+  or (status = 'pending' and auth.uid() = requester_id)
+);
+
 create policy "users can read own notifications"
 on public.plan_notifications for select
 using (auth.uid() = user_id);
@@ -342,6 +424,18 @@ begin
 
   if current_user_id = other_user_id then
     raise exception 'Cannot DM yourself';
+  end if;
+
+  if not exists (
+    select 1
+    from public.friend_requests friendship
+    where friendship.status = 'accepted'
+      and (
+        (friendship.requester_id = current_user_id and friendship.addressee_id = other_user_id)
+        or (friendship.requester_id = other_user_id and friendship.addressee_id = current_user_id)
+      )
+  ) then
+    raise exception 'You must be friends before starting a DM';
   end if;
 
   select mine.thread_id
@@ -458,6 +552,75 @@ $$;
 
 grant execute on function public.notify_plan_attendees(uuid, uuid, text, text, text) to authenticated;
 grant execute on function public.notify_dm_recipient(uuid, uuid, text, text) to authenticated;
+
+create or replace function public.notify_friend_request(
+  requester_user_id uuid,
+  addressee_user_id uuid,
+  notification_title text,
+  notification_body text
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if auth.uid() <> requester_user_id then
+    return;
+  end if;
+
+  insert into public.plan_notifications (user_id, kind, title, body)
+  values (addressee_user_id, 'friend_request', notification_title, notification_body);
+end;
+$$;
+
+create or replace function public.notify_plan_invite(
+  target_plan_id uuid,
+  sender_user_id uuid,
+  invitee_user_id uuid,
+  notification_title text,
+  notification_body text
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  target_catalog_bar_id text;
+begin
+  if auth.uid() <> sender_user_id then
+    return;
+  end if;
+
+  select catalog_bar_id into target_catalog_bar_id
+  from public.plans
+  where id = target_plan_id
+    and status <> 'ended'::public.plan_status;
+
+  if target_catalog_bar_id is null then
+    return;
+  end if;
+
+  if not exists (
+    select 1
+    from public.friend_requests friendship
+    where friendship.status = 'accepted'
+      and (
+        (friendship.requester_id = sender_user_id and friendship.addressee_id = invitee_user_id)
+        or (friendship.requester_id = invitee_user_id and friendship.addressee_id = sender_user_id)
+      )
+  ) then
+    return;
+  end if;
+
+  insert into public.plan_notifications (user_id, plan_id, catalog_bar_id, kind, title, body)
+  values (invitee_user_id, target_plan_id, target_catalog_bar_id, 'plan_invite', notification_title, notification_body);
+end;
+$$;
+
+grant execute on function public.notify_friend_request(uuid, uuid, text, text) to authenticated;
+grant execute on function public.notify_plan_invite(uuid, uuid, uuid, text, text) to authenticated;
 
 create or replace function public.notify_interested_users_for_plan(target_plan_id uuid)
 returns void

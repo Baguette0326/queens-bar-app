@@ -10,6 +10,7 @@ export type RemotePlan = {
   startsAtIso: string;
   endsAt: string;
   status: "ongoing" | "upcoming";
+  visibility: "public" | "friends";
   attendees: string[];
   attendeeProfiles: Array<{ id: string; username: string }>;
   cap?: number;
@@ -30,6 +31,7 @@ type PlanRow = {
   cap: number | null;
   note: string | null;
   status: "upcoming" | "ongoing" | "ended";
+  visibility: "public" | "friends" | null;
   catalog_bar: { name: string } | Array<{ name: string }> | null;
   starter: { username: string } | Array<{ username: string }> | null;
   plan_attendees: Array<{ user_id: string; left_at: string | null; profile: { username: string } | Array<{ username: string }> | null }>;
@@ -44,6 +46,7 @@ export type CreatePlanInput = {
   endsAt: Date;
   cap: number | null;
   note: string;
+  visibility: "public" | "friends";
 };
 
 function formatPlanTime(startsAt: string, status: RemotePlan["status"]) {
@@ -75,6 +78,7 @@ function rowToPlan(row: PlanRow, currentUserId?: string): RemotePlan {
     startsAtIso: row.starts_at,
     endsAt: row.ends_at,
     status: computedStatus,
+    visibility: row.visibility ?? "public",
     attendees: activeAttendees.map((attendee) => firstRelation(attendee.profile)?.username ?? "User"),
     attendeeProfiles: activeAttendees.map((attendee) => ({
       id: attendee.user_id,
@@ -102,6 +106,7 @@ export async function fetchPlans(currentUserId?: string) {
       cap,
       note,
       status,
+      visibility,
       catalog_bar:catalog_bars(name),
       starter:profiles!plans_started_by_fkey(username),
       plan_attendees(user_id,left_at,profile:profiles!plan_attendees_user_id_fkey(username))
@@ -126,6 +131,7 @@ export async function createPlan(input: CreatePlanInput) {
       ends_at: input.endsAt.toISOString(),
       cap: input.cap,
       note: input.note,
+      visibility: input.visibility,
       status: input.startsAt <= new Date() ? "ongoing" : "upcoming"
     })
     .select("id")

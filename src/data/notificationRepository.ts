@@ -6,7 +6,7 @@ export type PlanNotification = {
   planId: string | null;
   catalogBarId: string | null;
   dmThreadId: string | null;
-  kind: "pinned_bar_plan" | "group_join" | "group_message" | "dm_message" | string;
+  kind: "pinned_bar_plan" | "group_join" | "group_message" | "dm_message" | "friend_request" | "plan_invite" | string;
   title: string;
   body: string;
   readAt: string | null;
@@ -94,6 +94,29 @@ export async function notifyDmRecipient(threadId: string, senderId: string, titl
   const { error } = await supabase.rpc("notify_dm_recipient", {
     target_thread_id: threadId,
     sender_user_id: senderId,
+    notification_title: title,
+    notification_body: body
+  });
+
+  if (error) throw error;
+}
+
+export async function notifyFriendRequest(requesterId: string, addresseeId: string, title: string, body: string) {
+  const { error } = await supabase.rpc("notify_friend_request", {
+    requester_user_id: requesterId,
+    addressee_user_id: addresseeId,
+    notification_title: title,
+    notification_body: body
+  });
+
+  if (error) throw error;
+}
+
+export async function notifyPlanInvite(planId: string, senderId: string, inviteeId: string, title: string, body: string) {
+  const { error } = await supabase.rpc("notify_plan_invite", {
+    target_plan_id: planId,
+    sender_user_id: senderId,
+    invitee_user_id: inviteeId,
     notification_title: title,
     notification_body: body
   });

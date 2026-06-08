@@ -44,8 +44,9 @@ import { fetchCatalogBars } from "./src/data/catalogRepository";
 import { fetchChatMessages, RemoteChatMessage, sendChatMessage } from "./src/data/chatRepository";
 import { fetchCompletedBarIds, removeCompletedBar, selfCompleteBar } from "./src/data/completionRepository";
 import { fetchDmMessages, fetchDmThreads, getOrCreateDmThread, RemoteDmMessage, RemoteDmThread, sendDmMessage } from "./src/data/dmRepository";
+import { acceptFriendRequest, cancelFriendRequest, declineFriendRequest, fetchFriends, fetchFriendState, fetchIncomingFriendRequests, FriendRequest, FriendStatus, removeFriend, sendFriendRequest } from "./src/data/friendRepository";
 import { fetchPinnedBarIds, pinBar, unpinBar } from "./src/data/interestRepository";
-import { fetchNotifications, markNotificationRead, notifyDmRecipient, notifyPlanAttendees, PlanNotification } from "./src/data/notificationRepository";
+import { fetchNotifications, markNotificationRead, notifyDmRecipient, notifyFriendRequest, notifyPlanAttendees, notifyPlanInvite, PlanNotification } from "./src/data/notificationRepository";
 import { fetchLeaderboard, searchProfiles } from "./src/data/peopleRepository";
 import { cancelPlan as cancelRemotePlan, createPlan as createRemotePlan, fetchPlans, joinPlan as joinRemotePlan, leavePlan as leaveRemotePlan, RemotePlan } from "./src/data/planRepository";
 import { createProfile, fetchProfile, getRankFromXp, Profile, roleDbToLabel, updateProfileDetails, updateProfileXp } from "./src/data/profileRepository";
@@ -63,6 +64,7 @@ type Plan = {
   startsAt: string;
   startsAtIso?: string;
   status: "ongoing" | "upcoming";
+  visibility?: "public" | "friends";
   attendees: string[];
   attendeeProfiles?: Array<{ id: string; username: string }>;
   cap?: number;
@@ -156,6 +158,7 @@ export default function App() {
   const [planDay, setPlanDay] = useState<CreatePlanDay>("Today");
   const [planTime, setPlanTime] = useState(() => formatCreateTime(new Date(Date.now() + 60 * 60 * 1000)));
   const [planDurationMinutes, setPlanDurationMinutes] = useState(120);
+  const [planVisibility, setPlanVisibility] = useState<"public" | "friends">("public");
   const [planPlace, setPlanPlace] = useState("Goodes Hall");
   const [planDetail, setPlanDetail] = useState("front steps");
   const [planCap, setPlanCap] = useState(12);
@@ -182,6 +185,12 @@ export default function App() {
   const [peopleQuery, setPeopleQuery] = useState("");
   const [peopleResults, setPeopleResults] = useState<Profile[]>([]);
   const [peopleStatus, setPeopleStatus] = useState<"idle" | "loading" | "error">("idle");
+  const [incomingFriendRequests, setIncomingFriendRequests] = useState<FriendRequest[]>([]);
+  const [friends, setFriends] = useState<Profile[]>([]);
+  const [friendStatus, setFriendStatus] = useState<FriendStatus>("none");
+  const [selectedFriendRequestId, setSelectedFriendRequestId] = useState<string | null>(null);
+  const [friendActionStatus, setFriendActionStatus] = useState<"idle" | "saving">("idle");
+  const [invitingFriendId, setInvitingFriendId] = useState("");
   const [selectedPublicProfile, setSelectedPublicProfile] = useState<Profile | null>(null);
   const [publicProfileBackScreen, setPublicProfileBackScreen] = useState<Screen>("people");
   const [publicCompletedBarIds, setPublicCompletedBarIds] = useState<string[]>([]);
@@ -241,6 +250,16 @@ export default function App() {
     }
   }
 
+  async function loadFriendsData(userId = session?.user.id) {
+    if (!userId) return;
+    const [requests, nextFriends] = await Promise.all([
+      fetchIncomingFriendRequests(userId),
+      fetchFriends(userId)
+    ]);
+    setIncomingFriendRequests(requests);
+    setFriends(nextFriends);
+  }
+
   async function loadLeaderboard() {
     setLeaderboardStatus("loading");
     try {
@@ -259,10 +278,17 @@ export default function App() {
     setSelectedPublicProfile(nextProfile);
     setPublicProfileBackScreen(backScreen);
     setPublicCompletedBarIds([]);
+    setFriendStatus("none");
+    setSelectedFriendRequestId(null);
     setScreen("publicProfile");
     try {
-      const ids = await fetchCompletedBarIds(nextProfile.id);
+      const [ids, nextFriendState] = await Promise.all([
+        fetchCompletedBarIds(nextProfile.id),
+        session && session.user.id !== nextProfile.id ? fetchFriendState(session.user.id, nextProfile.id) : Promise.resolve({ status: "none" as FriendStatus, requestId: null })
+      ]);
       setPublicCompletedBarIds(ids);
+      setFriendStatus(nextFriendState.status);
+      setSelectedFriendRequestId(nextFriendState.requestId);
     } catch (error) {
       console.warn("Failed to load public completions.", error);
     }
@@ -271,6 +297,153 @@ export default function App() {
   async function openPublicProfileById(userId: string, backScreen: Screen = "chat") {
     const nextProfile = await fetchProfile(userId);
     if (nextProfile) openPublicProfile(nextProfile, backScreen);
+  }
+
+  async function requestFriendship() {
+    if (!session || !selectedPublicProfile || friendActionStatus === "saving") return;
+
+    setFriendActionStatus("saving");
+    try {
+      await sendFriendRequest(session.user.id, selectedPublicProfile.id);
+      notifyFriendRequest(
+        session.user.id,
+        selectedPublicProfile.id,
+        `${username} sent you a friend request`,
+        "Open People to accept or decline."
+      ).catch((error) => console.warn("Failed to notify friend request.", error));
+      await loadFriendsData(session.user.id);
+      const nextState = await fetchFriendState(session.user.id, selectedPublicProfile.id);
+      setFriendStatus(nextState.status);
+      setSelectedFriendRequestId(nextState.requestId);
+    } catch (error) {
+      const message = describeSupabaseError(error, "Could not send friend request. Run supabase/add_friends.sql first.");
+      if (Platform.OS === "web") {
+        window.alert(`Friend request failed: ${message}`);
+      } else {
+        Alert.alert("Friend request failed", message);
+      }
+    } finally {
+      setFriendActionStatus("idle");
+    }
+  }
+
+  async function respondToFriendRequest(requestId: string, response: "accept" | "decline") {
+    if (!session || friendActionStatus === "saving") return;
+
+    setFriendActionStatus("saving");
+    try {
+      if (response === "accept") {
+        await acceptFriendRequest(requestId, session.user.id);
+      } else {
+        await declineFriendRequest(requestId, session.user.id);
+      }
+      await loadFriendsData(session.user.id);
+      if (selectedPublicProfile) {
+        const nextState = await fetchFriendState(session.user.id, selectedPublicProfile.id);
+        setFriendStatus(nextState.status);
+        setSelectedFriendRequestId(nextState.requestId);
+      }
+    } catch (error) {
+      const message = describeSupabaseError(error, "Could not update friend request.");
+      if (Platform.OS === "web") {
+        window.alert(`Friend request failed: ${message}`);
+      } else {
+        Alert.alert("Friend request failed", message);
+      }
+    } finally {
+      setFriendActionStatus("idle");
+    }
+  }
+
+  async function runUnfriend() {
+    if (!session || !selectedPublicProfile || friendActionStatus === "saving") return;
+
+    setFriendActionStatus("saving");
+    try {
+      await removeFriend(session.user.id, selectedPublicProfile.id);
+      setFriendStatus("none");
+      setSelectedFriendRequestId(null);
+      setFriends((current) => current.filter((friend) => friend.id !== selectedPublicProfile.id));
+      await loadFriendsData(session.user.id);
+    } catch (error) {
+      const message = describeSupabaseError(error, "Could not remove friend.");
+      if (Platform.OS === "web") {
+        window.alert(`Unfriend failed: ${message}`);
+      } else {
+        Alert.alert("Unfriend failed", message);
+      }
+    } finally {
+      setFriendActionStatus("idle");
+    }
+  }
+
+  async function runCancelFriendRequest() {
+    if (!session || !selectedFriendRequestId || friendActionStatus === "saving") return;
+
+    setFriendActionStatus("saving");
+    try {
+      await cancelFriendRequest(selectedFriendRequestId, session.user.id);
+      setFriendStatus("none");
+      setSelectedFriendRequestId(null);
+      await loadFriendsData(session.user.id);
+    } catch (error) {
+      const message = describeSupabaseError(error, "Could not cancel friend request.");
+      if (Platform.OS === "web") {
+        window.alert(`Cancel request failed: ${message}`);
+      } else {
+        Alert.alert("Cancel request failed", message);
+      }
+    } finally {
+      setFriendActionStatus("idle");
+    }
+  }
+
+  function confirmUnfriend() {
+    if (!selectedPublicProfile) return;
+
+    if (Platform.OS === "web") {
+      const confirmed = window.confirm(`Remove ${selectedPublicProfile.username} as a friend?`);
+      if (confirmed) runUnfriend();
+      return;
+    }
+
+    Alert.alert(
+      "Remove friend?",
+      `Remove ${selectedPublicProfile.username} as a friend?`,
+      [
+        { text: "Keep friend", style: "cancel" },
+        { text: "Unfriend", style: "destructive", onPress: runUnfriend }
+      ]
+    );
+  }
+
+  async function inviteFriendToPlan(friend: Profile) {
+    if (!session || !selectedPlan || invitingFriendId) return;
+
+    setInvitingFriendId(friend.id);
+    try {
+      await notifyPlanInvite(
+        selectedPlan.id,
+        session.user.id,
+        friend.id,
+        `${username} invited you to ${selectedChallenge.name}`,
+        `${selectedPlan.place} - ${selectedPlan.startsAt}`
+      );
+      if (Platform.OS === "web") {
+        window.alert(`Invited ${friend.username}.`);
+      } else {
+        Alert.alert("Invite sent", `Invited ${friend.username}.`);
+      }
+    } catch (error) {
+      const message = describeSupabaseError(error, "Could not send invite. Run supabase/add_chat_dm_notifications.sql.");
+      if (Platform.OS === "web") {
+        window.alert(`Invite failed: ${message}`);
+      } else {
+        Alert.alert("Invite failed", message);
+      }
+    } finally {
+      setInvitingFriendId("");
+    }
   }
 
   useEffect(() => {
@@ -302,6 +475,7 @@ export default function App() {
           setScreen("discover");
           loadRemotePlans(nextSession.user.id);
           loadNotifications(nextSession.user.id);
+          loadFriendsData(nextSession.user.id);
           fetchCompletedBarIds(nextSession.user.id)
             .then((ids) => {
               if (alive) setCompletedBarIds(ids);
@@ -342,6 +516,9 @@ export default function App() {
 
     const timeout = setTimeout(() => {
       loadPeople(peopleQuery);
+      loadFriendsData().catch((error) => {
+        console.warn("Failed to load friend data.", error);
+      });
     }, 250);
 
     return () => clearTimeout(timeout);
@@ -517,6 +694,9 @@ export default function App() {
   const selectedChallenge = catalog.find((item) => item.id === selectedChallengeId) ?? catalog[0] ?? challenges[0];
   const selectedPlan = plans.find((item) => item.id === selectedPlanId) ?? plans[0];
   const selectedDmThread = dmThreads.find((thread) => thread.id === selectedDmThreadId);
+  const selectedIncomingFriendRequest = selectedPublicProfile
+    ? incomingFriendRequests.find((request) => request.requesterId === selectedPublicProfile.id)
+    : undefined;
   const matchingLivePlans = plans.filter(
     (plan) => plan.challengeId === selectedChallenge.id && (plan.status === "ongoing" || plan.status === "upcoming")
   );
@@ -605,6 +785,12 @@ export default function App() {
 
     if (notification.kind === "dm_message" && notification.dmThreadId) {
       await openDmThread(notification.dmThreadId);
+      return;
+    }
+
+    if (notification.kind === "friend_request") {
+      await loadFriendsData(session.user.id);
+      go("people");
       return;
     }
 
@@ -984,7 +1170,8 @@ export default function App() {
         startsAt,
         endsAt,
         cap: planCap > 0 ? planCap : null,
-        note
+        note,
+        visibility: planVisibility
       });
       const optimisticPlan: Plan = {
         id: planId,
@@ -994,6 +1181,7 @@ export default function App() {
         startsAt: formatCreatedPlanTime(startsAt),
         startsAtIso: startsAt.toISOString(),
         status: startsAt <= new Date() ? "ongoing" : "upcoming",
+        visibility: planVisibility,
         attendees: [username],
         cap: planCap > 0 ? planCap : undefined,
         note,
@@ -1141,7 +1329,7 @@ export default function App() {
           <View style={styles.loginScreen}>
             <BrandMark />
             <Text style={styles.welcomePill}>WELCOME TO</Text>
-            <Text style={styles.heroTitle}>QUEENS BARS</Text>
+            <Text style={styles.heroTitle}>RITUAL</Text>
             <Text style={styles.heroSubtitle}>Find the group. Do the bar. Build the jacket.</Text>
             <FieldLabel text="EMAIL" />
             <View style={styles.inputShell}>
@@ -1169,7 +1357,7 @@ export default function App() {
           <ScrollView contentContainerStyle={styles.onboarding}>
             <BrandMark />
             <Text style={styles.welcomePill}>WELCOME TO</Text>
-            <Text style={styles.heroTitle}>QUEENS BARS</Text>
+            <Text style={styles.heroTitle}>RITUAL</Text>
             <Text style={styles.heroSubtitle}>Let's build your jacket.</Text>
             <FieldLabel text="USERNAME" />
             <View style={styles.inputShell}>
@@ -1199,7 +1387,7 @@ export default function App() {
             </View>
             <View style={styles.guidelineRow}>
               <View style={styles.checkbox} />
-              <Text style={styles.guidelineText}>I agree to the Queens Bars Guidelines</Text>
+              <Text style={styles.guidelineText}>I agree to the Ritual Guidelines</Text>
             </View>
             <PatchButton
               label={authStatus === "saving" ? "SAVING..." : "LET'S GO!"}
@@ -1245,6 +1433,30 @@ export default function App() {
 
         {screen === "people" && (
           <DetailScreen back={() => go("discover")} title="PEOPLE">
+            {incomingFriendRequests.length > 0 && (
+              <>
+                <SectionHeader title="FRIEND REQUESTS" action={`${incomingFriendRequests.length}`} />
+                {incomingFriendRequests.map((request) => request.requester && (
+                  <FriendRequestRow
+                    key={request.id}
+                    request={request}
+                    onProfile={() => request.requester && openPublicProfile(request.requester)}
+                    onAccept={() => respondToFriendRequest(request.id, "accept")}
+                    onDecline={() => respondToFriendRequest(request.id, "decline")}
+                    disabled={friendActionStatus === "saving"}
+                  />
+                ))}
+              </>
+            )}
+            {friends.length > 0 && (
+              <>
+                <SectionHeader title="FRIENDS" action={`${friends.length}`} />
+                {friends.map((item) => (
+                  <PeopleRow key={item.id} profile={item} onPress={() => openPublicProfile(item)} />
+                ))}
+              </>
+            )}
+            <SectionHeader title="FIND PEOPLE" action={peopleStatus === "loading" ? "Loading" : undefined} />
             <SearchBar value={peopleQuery} onChange={setPeopleQuery} placeholder="Search display names..." />
             {peopleStatus === "loading" && <Text style={styles.emptyState}>Searching profiles...</Text>}
             {peopleStatus === "error" && <Text style={styles.emptyState}>Could not load profiles. Check Supabase policies and try again.</Text>}
@@ -1282,7 +1494,24 @@ export default function App() {
             </View>
             <FieldLabel text="BIO" />
             <Text style={styles.profileBio}>{selectedPublicProfile.bio || "No bio yet."}</Text>
-            {session?.user.id !== selectedPublicProfile.id && <PatchButton label="MESSAGE" tone="navy" onPress={() => startDm(selectedPublicProfile.id)} />}
+            {session?.user.id !== selectedPublicProfile.id && (
+              <>
+                {friendStatus === "incoming" && selectedIncomingFriendRequest && (
+                  <>
+                    <PatchButton label={friendActionStatus === "saving" ? "SAVING..." : "ACCEPT FRIEND"} tone="green" onPress={() => respondToFriendRequest(selectedIncomingFriendRequest.id, "accept")} />
+                    <OutlineButton label="DECLINE REQUEST" onPress={() => respondToFriendRequest(selectedIncomingFriendRequest.id, "decline")} />
+                  </>
+                )}
+                {friendStatus === "none" && <PatchButton label={friendActionStatus === "saving" ? "SENDING..." : "ADD FRIEND"} tone="green" onPress={requestFriendship} />}
+                {friendStatus === "outgoing" && <OutlineButton label={friendActionStatus === "saving" ? "CANCELING..." : "CANCEL REQUEST"} onPress={runCancelFriendRequest} />}
+                {friendStatus === "friends" && <OutlineButton label={friendActionStatus === "saving" ? "REMOVING..." : "UNFRIEND"} onPress={confirmUnfriend} />}
+                {friendStatus === "friends" ? (
+                  <PatchButton label="MESSAGE" tone="navy" onPress={() => startDm(selectedPublicProfile.id)} />
+                ) : (
+                  <Text style={styles.emptyState}>Add each other as friends to unlock DMs.</Text>
+                )}
+              </>
+            )}
             <SectionHeader title="COMPLETED BARS" action={`${publicCompletedChallenges.length}`} />
             {publicCompletedChallenges.length === 0 && <Text style={styles.emptyState}>No completed bars shown yet.</Text>}
             {publicCompletedChallenges.map((challenge) => (
@@ -1459,6 +1688,12 @@ export default function App() {
                 placeholderTextColor={colors.muted}
               />
             </View>
+            <FieldLabel text="WHO CAN SEE IT" />
+            <ChoiceFilterRow
+              labels={["Public", "Friends"]}
+              value={planVisibility === "public" ? "Public" : "Friends"}
+              onChange={(value) => setPlanVisibility(value === "Friends" ? "friends" : "public")}
+            />
             <FieldLabel text="CAP (OPTIONAL)" />
             <View style={styles.stepper}>
               <Pressable onPress={() => setPlanCap((current) => Math.max(1, current - 1))}>
@@ -1490,6 +1725,7 @@ export default function App() {
             <ChallengeHero challenge={selectedChallenge} compact />
             <PlanInfoRow icon={<CalendarDays color={colors.ink} size={18} />} label="TIME" value={selectedPlan.startsAt} />
             <PlanInfoRow icon={<MapPin color={colors.ink} size={18} />} label="LOCATION" value={`${selectedPlan.place}\n${selectedPlan.detail}`} />
+            <PlanInfoRow icon={<Users color={colors.ink} size={18} />} label="VISIBILITY" value={selectedPlan.visibility === "friends" ? "Friends only" : "Public"} />
             <PlanInfoRow icon={<Users color={colors.ink} size={18} />} label="ATTENDEES" value={`${selectedPlan.attendees.length} / ${selectedPlan.cap ?? "âˆž"}`} />
             <Pressable
               onPress={() => selectedPlan.startedById && openPublicProfileById(selectedPlan.startedById, "plan")}
@@ -1498,6 +1734,21 @@ export default function App() {
               <PlanInfoRow icon={<AvatarIcon avatar="gear" color={colors.ink} size={18} />} label="STARTED BY" value={selectedPlan.startedBy} />
             </Pressable>
             <PlanInfoRow icon={<BookOpen color={colors.ink} size={18} />} label="NOTE" value={selectedPlan.note} />
+            {(selectedPlan.currentUserJoined || selectedPlan.attendees.includes(username)) && (
+              <>
+                <SectionHeader title="INVITE FRIENDS" action={friends.length ? `${friends.length}` : undefined} />
+                {friends.length === 0 && <Text style={styles.emptyState}>Add friends to invite them to plans.</Text>}
+                {friends.map((friend) => (
+                  <FriendInviteRow
+                    key={friend.id}
+                    friend={friend}
+                    disabled={!!invitingFriendId}
+                    inviting={invitingFriendId === friend.id}
+                    onInvite={() => inviteFriendToPlan(friend)}
+                  />
+                ))}
+              </>
+            )}
             <PatchButton
               label={selectedPlan.currentUserJoined || selectedPlan.attendees.includes(username) ? "OPEN GROUP CHAT" : "I'M IN!"}
               tone="green"
@@ -1730,8 +1981,10 @@ function AppScreen({ title, right, children }: { title: string; right?: React.Re
   return (
     <View style={styles.flex}>
       <View style={styles.appHeader}>
-        <Crown color={colors.gold} size={23} fill={colors.gold} />
-        <Text style={styles.appHeaderTitle}>{title}</Text>
+        <View style={styles.headerLeft}><Crown color={colors.gold} size={23} fill={colors.gold} /></View>
+        <View pointerEvents="none" style={styles.appHeaderTitleWrap}>
+          <Text style={styles.appHeaderTitle}>{title}</Text>
+        </View>
         <View style={styles.headerRight}>{right}</View>
       </View>
       <ScrollView contentContainerStyle={styles.screenContent}>{children}</ScrollView>
@@ -1865,7 +2118,7 @@ function BrandMark() {
   return (
     <View style={styles.brandMark}>
       <Crown color={colors.gold} size={20} fill={colors.gold} />
-      <Text style={styles.brandMarkText}>QB</Text>
+      <Text style={styles.brandMarkText}>R</Text>
     </View>
   );
 }
@@ -1941,15 +2194,17 @@ function NotificationRow({
 }) {
   const unread = !notification.readAt;
   const isDm = notification.kind === "dm_message";
+  const isFriendRequest = notification.kind === "friend_request";
+  const isPlanInvite = notification.kind === "plan_invite";
   const time = notification.plan?.startsAt
     ? new Date(notification.plan.startsAt).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
     : new Date(notification.createdAt).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-  const meta = isDm ? "Direct message" : notification.plan?.locationName ?? challenge?.name ?? "Group chat";
+  const meta = isDm ? "Direct message" : isFriendRequest ? "Friend request" : isPlanInvite ? "Plan invite" : notification.plan?.locationName ?? challenge?.name ?? "Group chat";
 
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [styles.notificationRow, unread && styles.notificationRowUnread, pressedScale(pressed)]}>
       <View style={styles.notificationIcon}>
-        <AvatarIcon avatar={isDm ? "crown" : challenge?.icon ?? "star"} color={unread ? colors.gold : colors.ink} size={22} />
+        <AvatarIcon avatar={isDm || isFriendRequest ? "crown" : challenge?.icon ?? "star"} color={unread ? colors.gold : colors.ink} size={22} />
       </View>
       <View style={styles.flex}>
         <Text style={styles.notificationTitle}>{notification.title}</Text>
@@ -1999,6 +2254,67 @@ function PeopleRow({ profile, onPress }: { profile: Profile; onPress: () => void
         <Text style={styles.peopleTierText}>{getRankFromXp(profile.xp)}</Text>
       </View>
     </Pressable>
+  );
+}
+
+function FriendRequestRow({
+  request,
+  onProfile,
+  onAccept,
+  onDecline,
+  disabled
+}: {
+  request: FriendRequest;
+  onProfile: () => void;
+  onAccept: () => void;
+  onDecline: () => void;
+  disabled: boolean;
+}) {
+  if (!request.requester) return null;
+
+  return (
+    <View style={styles.friendRequestRow}>
+      <Pressable onPress={onProfile} style={({ pressed }) => [styles.friendRequestProfile, pressedScale(pressed)]}>
+        <View style={styles.peopleAvatar}><AvatarIcon avatar={request.requester.avatar} color={colors.gold} size={24} /></View>
+        <View style={styles.flex}>
+          <Text style={styles.peopleName}>{request.requester.username}</Text>
+          <Text style={styles.peopleMeta}>Wants to add you</Text>
+        </View>
+      </Pressable>
+      <View style={styles.friendRequestActions}>
+        <Pressable disabled={disabled} onPress={onDecline} style={({ pressed }) => [styles.smallOutlineButton, pressedScale(pressed)]}>
+          <Text style={styles.smallOutlineButtonText}>NO</Text>
+        </Pressable>
+        <Pressable disabled={disabled} onPress={onAccept} style={({ pressed }) => [styles.smallSolidButton, pressedScale(pressed)]}>
+          <Text style={styles.smallSolidButtonText}>ADD</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+function FriendInviteRow({
+  friend,
+  inviting,
+  disabled,
+  onInvite
+}: {
+  friend: Profile;
+  inviting: boolean;
+  disabled: boolean;
+  onInvite: () => void;
+}) {
+  return (
+    <View style={styles.friendInviteRow}>
+      <View style={styles.peopleAvatar}><AvatarIcon avatar={friend.avatar} color={colors.gold} size={24} /></View>
+      <View style={styles.flex}>
+        <Text style={styles.peopleName}>{friend.username}</Text>
+        <Text style={styles.peopleMeta}>{getRankFromXp(friend.xp)}</Text>
+      </View>
+      <Pressable disabled={disabled} onPress={onInvite} style={({ pressed }) => [styles.smallSolidButton, disabled && styles.disabledButton, pressedScale(pressed)]}>
+        <Text style={styles.smallSolidButtonText}>{inviting ? "SENDING" : "INVITE"}</Text>
+      </Pressable>
+    </View>
   );
 }
 
@@ -2263,10 +2579,12 @@ const styles = StyleSheet.create({
   guidelineText: { color: colors.muted, fontSize: 11 },
   handNote: { alignSelf: "flex-end", color: colors.ink, fontSize: 13, fontStyle: "italic", textAlign: "right", marginTop: 12 },
   authMessage: { color: colors.ink, fontSize: 13, fontWeight: "700", lineHeight: 19, marginTop: 12, textAlign: "center" },
-  appHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", height: 54, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: colors.line, backgroundColor: colors.paperLight },
+  appHeader: { position: "relative", flexDirection: "row", alignItems: "center", justifyContent: "space-between", height: 54, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: colors.line, backgroundColor: colors.paperLight },
   detailHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", height: 48, paddingHorizontal: 12, backgroundColor: colors.paperLight },
-  appHeaderTitle: { color: colors.ink, fontSize: 22, fontWeight: "900" },
-  headerRight: { minWidth: 28, alignItems: "flex-end" },
+  headerLeft: { width: 112, alignItems: "flex-start", justifyContent: "center" },
+  appHeaderTitleWrap: { position: "absolute", left: 72, right: 72, alignItems: "center" },
+  appHeaderTitle: { textAlign: "center", color: colors.ink, fontSize: 22, fontWeight: "900" },
+  headerRight: { width: 112, alignItems: "flex-end" },
   headerActions: { flexDirection: "row", alignItems: "center", gap: 4 },
   headerIconButton: { width: 40, height: 40, alignItems: "center", justifyContent: "center" },
   xpBadge: { color: colors.ink, fontSize: 12, fontWeight: "900", borderWidth: 1, borderColor: colors.ink, borderRadius: 5, paddingHorizontal: 6, paddingVertical: 3, fontVariant: ["tabular-nums"] },
@@ -2298,6 +2616,15 @@ const styles = StyleSheet.create({
   peopleMeta: { color: colors.muted, fontSize: 11, fontWeight: "700", marginTop: 3 },
   peopleTier: { borderWidth: 1, borderColor: colors.ink, borderRadius: 5, paddingHorizontal: 7, paddingVertical: 4 },
   peopleTierText: { color: colors.ink, fontSize: 10, fontWeight: "900" },
+  friendRequestRow: { borderWidth: 1, borderColor: colors.gold, borderRadius: 8, backgroundColor: colors.paperLight, padding: 10, marginBottom: 9 },
+  friendRequestProfile: { minHeight: 44, flexDirection: "row", alignItems: "center", gap: 10 },
+  friendRequestActions: { flexDirection: "row", gap: 8, marginTop: 9 },
+  smallOutlineButton: { flex: 1, minHeight: 38, borderWidth: 1, borderColor: colors.line, borderRadius: 7, alignItems: "center", justifyContent: "center", backgroundColor: colors.paper },
+  smallOutlineButtonText: { color: colors.ink, fontSize: 11, fontWeight: "900" },
+  smallSolidButton: { flex: 1, minHeight: 38, borderWidth: 1, borderColor: colors.gold, borderRadius: 7, alignItems: "center", justifyContent: "center", backgroundColor: colors.green },
+  smallSolidButtonText: { color: colors.cream, fontSize: 11, fontWeight: "900" },
+  friendInviteRow: { minHeight: 58, flexDirection: "row", alignItems: "center", gap: 10, borderWidth: 1, borderColor: colors.line, borderRadius: 8, backgroundColor: colors.paperLight, padding: 10, marginBottom: 8 },
+  disabledButton: { opacity: 0.6 },
   leaderboardRow: { flexDirection: "row", alignItems: "center", gap: 10, borderWidth: 1, borderColor: colors.line, borderRadius: 8, backgroundColor: colors.paperLight, padding: 11, marginBottom: 9 },
   leaderboardPlace: { width: 26, color: colors.ink, fontSize: 15, fontWeight: "900", textAlign: "center", fontVariant: ["tabular-nums"] },
   planPatch: { flexDirection: "row", alignItems: "center", borderWidth: 2, borderRadius: 8, padding: 10, marginBottom: 9, borderStyle: "dashed" },

@@ -1,4 +1,4 @@
-# Queens Bars MVP
+# Ritual MVP
 
 An Expo/React Native prototype for a Queen's campus traditions app.
 

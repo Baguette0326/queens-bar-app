@@ -19,16 +19,35 @@ create table if not exists public.dm_messages (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.friend_requests (
+  id uuid primary key default gen_random_uuid(),
+  requester_id uuid not null references public.profiles(id) on delete cascade,
+  addressee_id uuid not null references public.profiles(id) on delete cascade,
+  status text not null default 'pending' check (status in ('pending', 'accepted', 'declined')),
+  created_at timestamptz not null default now(),
+  responded_at timestamptz,
+  check (requester_id <> addressee_id)
+);
+
 alter table public.dm_threads enable row level security;
 alter table public.dm_members enable row level security;
 alter table public.dm_messages enable row level security;
+alter table public.friend_requests enable row level security;
 
 grant select on public.dm_threads to authenticated;
 grant select on public.dm_members to authenticated;
 grant select, insert on public.dm_messages to authenticated;
+grant select, insert, update, delete on public.friend_requests to authenticated;
 
 create index if not exists dm_members_user_idx on public.dm_members(user_id);
 create index if not exists dm_messages_thread_created_idx on public.dm_messages(thread_id, created_at);
+create unique index if not exists friend_requests_pair_unique_idx
+on public.friend_requests (
+  least(requester_id, addressee_id),
+  greatest(requester_id, addressee_id)
+)
+where status in ('pending', 'accepted');
+create index if not exists friend_requests_addressee_status_idx on public.friend_requests(addressee_id, status, created_at desc);
 
 create or replace function public.is_dm_member(target_thread_id uuid)
 returns boolean
@@ -66,6 +85,34 @@ with check (
   and public.is_dm_member(thread_id)
 );
 
+drop policy if exists "users can read own friend requests" on public.friend_requests;
+create policy "users can read own friend requests"
+on public.friend_requests for select
+using (auth.uid() = requester_id or auth.uid() = addressee_id);
+
+drop policy if exists "users can send friend requests" on public.friend_requests;
+create policy "users can send friend requests"
+on public.friend_requests for insert
+with check (
+  auth.uid() = requester_id
+  and requester_id <> addressee_id
+  and status = 'pending'
+);
+
+drop policy if exists "users can respond to incoming friend requests" on public.friend_requests;
+create policy "users can respond to incoming friend requests"
+on public.friend_requests for update
+using (auth.uid() = addressee_id)
+with check (auth.uid() = addressee_id);
+
+drop policy if exists "users can remove own friendships" on public.friend_requests;
+create policy "users can remove own friendships"
+on public.friend_requests for delete
+using (
+  (status = 'accepted' and (auth.uid() = requester_id or auth.uid() = addressee_id))
+  or (status = 'pending' and auth.uid() = requester_id)
+);
+
 create or replace function public.get_or_create_dm_thread(other_user_id uuid)
 returns uuid
 language plpgsql
@@ -83,6 +130,18 @@ begin
 
   if current_user_id = other_user_id then
     raise exception 'Cannot DM yourself';
+  end if;
+
+  if not exists (
+    select 1
+    from public.friend_requests friendship
+    where friendship.status = 'accepted'
+      and (
+        (friendship.requester_id = current_user_id and friendship.addressee_id = other_user_id)
+        or (friendship.requester_id = other_user_id and friendship.addressee_id = current_user_id)
+      )
+  ) then
+    raise exception 'You must be friends before starting a DM';
   end if;
 
   select mine.thread_id

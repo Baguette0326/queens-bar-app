@@ -97,6 +97,75 @@ $$;
 grant execute on function public.notify_plan_attendees(uuid, uuid, text, text, text) to authenticated;
 grant execute on function public.notify_dm_recipient(uuid, uuid, text, text) to authenticated;
 
+create or replace function public.notify_friend_request(
+  requester_user_id uuid,
+  addressee_user_id uuid,
+  notification_title text,
+  notification_body text
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if auth.uid() <> requester_user_id then
+    return;
+  end if;
+
+  insert into public.plan_notifications (user_id, kind, title, body)
+  values (addressee_user_id, 'friend_request', notification_title, notification_body);
+end;
+$$;
+
+create or replace function public.notify_plan_invite(
+  target_plan_id uuid,
+  sender_user_id uuid,
+  invitee_user_id uuid,
+  notification_title text,
+  notification_body text
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  target_catalog_bar_id text;
+begin
+  if auth.uid() <> sender_user_id then
+    return;
+  end if;
+
+  select catalog_bar_id into target_catalog_bar_id
+  from public.plans
+  where id = target_plan_id
+    and status <> 'ended'::public.plan_status;
+
+  if target_catalog_bar_id is null then
+    return;
+  end if;
+
+  if not exists (
+    select 1
+    from public.friend_requests friendship
+    where friendship.status = 'accepted'
+      and (
+        (friendship.requester_id = sender_user_id and friendship.addressee_id = invitee_user_id)
+        or (friendship.requester_id = invitee_user_id and friendship.addressee_id = sender_user_id)
+      )
+  ) then
+    return;
+  end if;
+
+  insert into public.plan_notifications (user_id, plan_id, catalog_bar_id, kind, title, body)
+  values (invitee_user_id, target_plan_id, target_catalog_bar_id, 'plan_invite', notification_title, notification_body);
+end;
+$$;
+
+grant execute on function public.notify_friend_request(uuid, uuid, text, text) to authenticated;
+grant execute on function public.notify_plan_invite(uuid, uuid, uuid, text, text) to authenticated;
+
 create or replace function public.notify_interested_users_for_plan(target_plan_id uuid)
 returns void
 language plpgsql
