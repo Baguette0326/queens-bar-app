@@ -1,5 +1,6 @@
 import { generatedWikiChallenges } from "./catalog.generated";
 import barSheetRows from "./bar-sheet.json";
+import collectionRows from "./bar-collections.json";
 
 export type AvatarId = "crown" | "gear" | "cap" | "gem" | "hall" | "star";
 export type ChallengeTone = "navy" | "red" | "green" | "paper";
@@ -32,6 +33,23 @@ export type Challenge = {
   icon: AvatarId;
   sourceUrl: string;
   reviewed: boolean;
+  collectionSet?: string;
+  setBonusXp?: number;
+  collectionBadge?: string;
+  collectionTagline?: string;
+};
+
+export type ChallengeCollection = {
+  id: string;
+  name: string;
+  tagline: string;
+  barsIncluded: string[];
+  barIds: string[];
+  barCount: number;
+  difficultyMix: string;
+  bonusXp: number;
+  badge: string;
+  designNotes: string;
 };
 
 const wiki = "https://gpabars.fandom.com/wiki/";
@@ -370,6 +388,10 @@ function applySheetOverride(challenge: Challenge): Challenge {
     summary: override?.summary ?? summarizeDescription(row.description),
     instructions: override?.instructions ?? "Refer to the linked wiki page for the full traditional requirements before organizing this bar.",
     tags: [...new Set([...challenge.tags.filter((tag) => tag !== "Review required" && tag !== "Shenanigans"), ...tagsFromSheetRow(row)])],
+    collectionSet: row.collectionSet,
+    setBonusXp: row.setBonusXp,
+    collectionBadge: row.collectionBadge,
+    collectionTagline: row.collectionTagline,
     reviewed: true
   };
 }
@@ -404,7 +426,11 @@ function challengeFromSheetRow(row: (typeof barSheetRows)[number]): Challenge {
     tone: "navy",
     icon: "star",
     sourceUrl: row.sourceUrl,
-    reviewed: true
+    reviewed: true,
+    collectionSet: row.collectionSet,
+    setBonusXp: row.setBonusXp,
+    collectionBadge: row.collectionBadge,
+    collectionTagline: row.collectionTagline
   };
 }
 
@@ -420,6 +446,7 @@ function tagsFromSheetRow(row: (typeof barSheetRows)[number]) {
   const tags = new Set<string>();
   tags.add(titleDifficulty(row.difficulty));
   if (row.difficulty === "legendary") tags.add("High XP");
+  if (row.collectionSet) tags.add(row.collectionSet);
   return [...tags];
 }
 
@@ -432,6 +459,20 @@ const availableByUrl = new Map(availableChallenges.map((challenge) => [normalize
 export const challenges: Challenge[] = barSheetRows
   .map((row) => availableByUrl.get(normalizeWikiUrl(row.sourceUrl)) ?? challengeFromSheetRow(row))
   .sort((a, b) => a.name.localeCompare(b.name));
+
+const challengesByName = new Map(challenges.map((challenge) => [challenge.name.toLowerCase(), challenge]));
+
+export const challengeCollections: ChallengeCollection[] = collectionRows.map((collection) => {
+  const barIds = collection.barsIncluded
+    .map((name) => challengesByName.get(name.toLowerCase())?.id)
+    .filter((id): id is string => Boolean(id));
+
+  return {
+    ...collection,
+    barIds,
+    barCount: barIds.length || collection.barCount
+  };
+});
 
 const socialKeywords = [
   "beerio",

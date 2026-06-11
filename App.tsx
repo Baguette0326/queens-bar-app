@@ -39,7 +39,7 @@ import {
   Wrench
 } from "lucide-react-native";
 import type { Session } from "@supabase/supabase-js";
-import { AvatarId, BrowseCategory, Challenge, ChallengeTone, challenges, getBrowseCategories } from "./src/data/catalog";
+import { AvatarId, BrowseCategory, Challenge, ChallengeCollection, ChallengeTone, challengeCollections, challenges, getBrowseCategories } from "./src/data/catalog";
 import { fetchCatalogBars } from "./src/data/catalogRepository";
 import { fetchChatMessages, RemoteChatMessage, sendChatMessage } from "./src/data/chatRepository";
 import { fetchCompletedBarIds, removeCompletedBar, selfCompleteBar } from "./src/data/completionRepository";
@@ -58,6 +58,7 @@ type CreatePlanDay = "Today" | "Tomorrow";
 
 const LAST_SCREEN_STORAGE_KEY = "ritual:lastScreen";
 const RESTORABLE_SCREENS = new Set<Screen>(["discover", "catalog", "chats", "profile", "notifications", "completed", "people", "leaderboard"]);
+const USERNAME_COOLDOWN_DAYS = 30;
 
 function readStoredScreen(): Screen | null {
   if (Platform.OS !== "web") return null;
@@ -78,6 +79,31 @@ function writeStoredScreen(screen: Screen) {
   } catch {
     // Ignore storage failures; navigation still works without persistence.
   }
+}
+
+function getUsernameCooldown(profile: Profile | null) {
+  if (!profile?.username_changed_at) return { canChange: true, daysLeft: 0 };
+
+  const lastChanged = new Date(profile.username_changed_at).getTime();
+  if (Number.isNaN(lastChanged)) return { canChange: true, daysLeft: 0 };
+
+  const nextChangeAt = lastChanged + USERNAME_COOLDOWN_DAYS * 24 * 60 * 60 * 1000;
+  const daysLeft = Math.ceil((nextChangeAt - Date.now()) / (24 * 60 * 60 * 1000));
+  return { canChange: daysLeft <= 0, daysLeft: Math.max(daysLeft, 0) };
+}
+
+function getPatchProgress(completedIds: string[]) {
+  const completed = new Set(completedIds);
+  return challengeCollections.map((collection) => {
+    const total = collection.barIds.length || collection.barCount;
+    const completedCount = collection.barIds.filter((id) => completed.has(id)).length;
+    return {
+      ...collection,
+      total,
+      completed: completedCount,
+      unlocked: total > 0 && completedCount >= total
+    };
+  });
 }
 
 type Plan = {
@@ -172,6 +198,7 @@ export default function App() {
   const [selectedChallengeId, setSelectedChallengeId] = useState("advance-to-goodes");
   const [selectedPlanId, setSelectedPlanId] = useState("plan-beerio");
   const [username, setUsername] = useState("GearShift");
+  const [draftUsername, setDraftUsername] = useState("GearShift");
   const [avatar, setAvatar] = useState<AvatarId>("gear");
   const [draftBio, setDraftBio] = useState("");
   const [role, setRole] = useState("Frosh");
@@ -189,6 +216,7 @@ export default function App() {
   const [planCap, setPlanCap] = useState(12);
   const [planNote, setPlanNote] = useState("Bring your best voice.");
   const [publishingPlan, setPublishingPlan] = useState(false);
+  const [planCreateMessage, setPlanCreateMessage] = useState("");
   const [pinnedBarIds, setPinnedBarIds] = useState<string[]>([]);
   const [interestStatus, setInterestStatus] = useState<"idle" | "saving">("idle");
   const [completedBarIds, setCompletedBarIds] = useState<string[]>([]);
@@ -237,6 +265,7 @@ export default function App() {
         }
       } else {
         setPlans([]);
+        setSelectedPlanId("");
         setPlansStatus("remote");
       }
       return remotePlans;
@@ -494,6 +523,7 @@ export default function App() {
 
         if (nextProfile) {
           setUsername(nextProfile.username);
+          setDraftUsername(nextProfile.username);
           setAvatar(nextProfile.avatar);
           setDraftBio(nextProfile.bio ?? "");
           setRole(roleDbToLabel(nextProfile.role));
@@ -691,6 +721,8 @@ export default function App() {
         roleLabel: role
       });
       setProfile(savedProfile);
+      setUsername(savedProfile.username);
+      setDraftUsername(savedProfile.username);
       setXp(savedProfile.xp);
       setScreen("discover");
     } catch (error) {
@@ -704,14 +736,32 @@ export default function App() {
   async function saveProfileDetails() {
     if (!session || profileSaveStatus === "saving") return;
 
+    const trimmedUsername = draftUsername.trim();
+    const usernameCooldown = getUsernameCooldown(profile);
+    const usernameChanged = Boolean(profile && trimmedUsername !== profile.username);
+
+    if (trimmedUsername.length < 3) {
+      Alert.alert("Profile not saved", "Display name must be at least 3 characters.");
+      return;
+    }
+
+    if (usernameChanged && !usernameCooldown.canChange) {
+      Alert.alert("Profile not saved", `You can change your display name again in ${usernameCooldown.daysLeft} day${usernameCooldown.daysLeft === 1 ? "" : "s"}.`);
+      return;
+    }
+
     setProfileSaveStatus("saving");
     try {
       const savedProfile = await updateProfileDetails({
         userId: session.user.id,
+        username: trimmedUsername,
+        updateUsername: usernameChanged,
         avatar,
         bio: draftBio.slice(0, 160)
       });
       setProfile(savedProfile);
+      setUsername(savedProfile.username);
+      setDraftUsername(savedProfile.username);
       setAvatar(savedProfile.avatar);
       if (savedProfile.bio !== null || !draftBio.trim()) {
         setDraftBio(savedProfile.bio ?? "");
@@ -742,11 +792,22 @@ export default function App() {
     (plan) => plan.challengeId === selectedChallenge.id && (plan.status === "ongoing" || plan.status === "upcoming")
   );
   const currentUserStartedPlan = !!session && selectedPlan?.startedById === session.user.id;
+  const selectedPlanHasOtherAttendees = Boolean(
+    selectedPlan &&
+      session &&
+      (
+        selectedPlan.attendeeProfiles?.some((attendee) => attendee.id !== session.user.id) ||
+        (!selectedPlan.attendeeProfiles?.length && selectedPlan.attendees.some((attendee) => attendee !== username))
+      )
+  );
+  const canCurrentUserCancelPlan = currentUserStartedPlan && !selectedPlanHasOtherAttendees;
   const selectedChallengePinned = pinnedBarIds.includes(selectedChallenge.id);
   const selectedChallengeCompleted = completedBarIds.includes(selectedChallenge.id);
   const unreadNotificationCount = notifications.filter((notification) => !notification.readAt).length;
   const completedChallenges = catalog.filter((challenge) => completedBarIds.includes(challenge.id));
   const publicCompletedChallenges = catalog.filter((challenge) => publicCompletedBarIds.includes(challenge.id));
+  const patchProgress = getPatchProgress(completedBarIds);
+  const publicPatchProgress = getPatchProgress(publicCompletedBarIds);
   const joinedPlans = plans.filter((plan) => plan.currentUserJoined || plan.attendees.includes(username));
   const selectedPlanAttendeeIds = new Set(selectedPlan?.attendeeProfiles?.map((attendee) => attendee.id) ?? []);
   const selectedPlanAttendeeNames = new Set(selectedPlan?.attendees ?? []);
@@ -755,6 +816,8 @@ export default function App() {
   );
   const tier = getRankFromXp(xp);
   const rankProgress = getRankProgress(xp);
+  const usernameCooldown = getUsernameCooldown(profile);
+  const usernameChanged = profile ? draftUsername.trim() !== profile.username : false;
 
   useEffect(() => {
     if (screen !== "chat" || !session || !selectedPlan?.id) return;
@@ -798,6 +861,11 @@ export default function App() {
   const visibleChallenges = filteredChallenges.slice(0, 80);
 
   function go(screenName: Screen) {
+    if (screenName === "create") {
+      setPlanDay("Today");
+      setPlanTime(formatCreateTime(new Date(Date.now() + 60 * 60 * 1000)));
+      setPlanCreateMessage("");
+    }
     setScreen(screenName);
   }
 
@@ -1093,18 +1161,22 @@ export default function App() {
 
     try {
       await sendChatMessage(leavingPlanId, session.user.id, `${username} left the plan.`);
-      await leaveRemotePlan(leavingPlanId, session.user.id);
+      const planEnded = await leaveRemotePlan(leavingPlanId, session.user.id);
       setMessages([]);
       setChatMembersOpen(false);
+      go("chats");
       setPlans((current) => {
-        const nextPlans = current.map((plan) => {
+        const nextPlans = current.flatMap((plan) => {
           if (plan.id !== leavingPlanId) return plan;
-          return {
+          const updatedPlan = {
             ...plan,
             attendees: plan.attendees.filter((attendee) => attendee !== username),
             attendeeProfiles: plan.attendeeProfiles?.filter((attendee) => attendee.id !== session.user.id) ?? [],
             currentUserJoined: false
           };
+
+          if (planEnded || updatedPlan.attendeeProfiles.length === 0 || updatedPlan.attendees.length === 0) return [];
+          return [updatedPlan];
         });
         return nextPlans;
       });
@@ -1112,7 +1184,6 @@ export default function App() {
       if (remotePlans?.some((plan) => plan.id === leavingPlanId)) {
         setSelectedPlanId(leavingPlanId);
       }
-      go("chats");
     } catch (error) {
       const message = describeSupabaseError(error, "Could not leave plan. You may need to run supabase/add_leave_plan.sql.");
       if (Platform.OS === "web") {
@@ -1172,10 +1243,23 @@ export default function App() {
       return;
     }
 
-    const schedule = buildCreatePlanSchedule(planDay, planTime, planDurationMinutes);
+    let schedule = buildCreatePlanSchedule(planDay, planTime, planDurationMinutes);
     if (!schedule) {
-      Alert.alert("Check the time", "Enter a future time like 7:00 PM, 7 PM, or 19:00.");
-      return;
+      const parsedTime = parseCreateTime(planTime);
+      if (parsedTime && planDay === "Today") {
+        const refreshedStart = new Date(Date.now() + 60 * 60 * 1000);
+        schedule = {
+          startsAt: refreshedStart,
+          endsAt: new Date(refreshedStart.getTime() + planDurationMinutes * 60 * 1000)
+        };
+        setPlanTime(formatCreateTime(refreshedStart));
+        setPlanCreateMessage("That time had passed, so the plan time was moved one hour ahead.");
+      } else {
+        const message = "Enter a future time like 7:00 PM, 7 PM, or 19:00.";
+        setPlanCreateMessage(message);
+        Alert.alert("Check the time", message);
+        return;
+      }
     }
 
     const { startsAt, endsAt } = schedule;
@@ -1212,10 +1296,16 @@ export default function App() {
     }
 
     try {
+      setPlanCreateMessage("");
       setPublishingPlan(true);
+      const { data: authData, error: authError } = await supabase.auth.getUser();
+      if (authError || !authData.user) {
+        throw new Error(authError?.message ?? "You need to sign in again before creating a plan.");
+      }
+
       const planId = await createRemotePlan({
         catalogBarId: selectedChallenge.id,
-        userId: session.user.id,
+        userId: authData.user.id,
         locationName,
         locationDetail,
         startsAt,
@@ -1237,17 +1327,18 @@ export default function App() {
         cap: planCap > 0 ? planCap : undefined,
         note,
         startedBy: username,
-        startedById: session.user.id,
+        startedById: authData.user.id,
         currentUserJoined: true
       };
       setPlans((current) => [optimisticPlan, ...current.filter((plan) => plan.id !== planId)]);
       setSelectedPlanId(planId);
       go("discover");
-      loadRemotePlans(session.user.id, planId).catch((error) => {
+      loadRemotePlans(authData.user.id, planId).catch((error) => {
         console.warn("Failed to refresh plans after publish.", error);
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Could not create plan.";
+      setPlanCreateMessage(message);
       Alert.alert("Plan not created", message);
     } finally {
       setPublishingPlan(false);
@@ -1257,18 +1348,28 @@ export default function App() {
   async function cancelPlan() {
     if (!session || !selectedPlan) return;
 
+    if (!canCurrentUserCancelPlan) {
+      const message = "You can only cancel a plan before anyone else joins. Ask attendees to leave first, or keep the plan active.";
+      if (Platform.OS === "web") {
+        window.alert(message);
+      } else {
+        Alert.alert("Plan has attendees", message);
+      }
+      return;
+    }
+
     async function runCancelPlan() {
       if (!session || !selectedPlan) return;
       const canceledPlanId = selectedPlan.id;
 
       try {
-        await notifyPlanCanceled(
+        await cancelRemotePlan(canceledPlanId, session.user.id);
+        notifyPlanCanceled(
           canceledPlanId,
           session.user.id,
           `${selectedChallenge.name} was canceled`,
           `${selectedPlan.place} - ${selectedPlan.startsAt}`
-        );
-        await cancelRemotePlan(canceledPlanId, session.user.id);
+        ).catch((error) => console.warn("Failed to notify attendees about canceled plan.", error));
         setPlans((current) => {
           const nextPlans = current.filter((plan) => plan.id !== canceledPlanId);
           setSelectedPlanId(nextPlans[0]?.id ?? "");
@@ -1549,10 +1650,15 @@ export default function App() {
               </View>
               <View style={styles.tierPatch}><Text style={styles.tierSmall}>TIER</Text><Text style={styles.tierTitle}>{getRankFromXp(selectedPublicProfile.xp)}</Text><Award color={colors.gold} size={28} /></View>
             </View>
+            <View style={styles.profileStatGrid}>
+              <StatBlock value={getRankFromXp(selectedPublicProfile.xp)} label="Rank" />
+              <StatBlock value={publicCompletedChallenges.length.toString()} label="Completed" />
+              <StatBlock value={friendStatus === "friends" ? "Friend" : "Public"} label="Access" />
+            </View>
             <FieldLabel text="BIO" />
             <Text style={styles.profileBio}>{selectedPublicProfile.bio || "No bio yet."}</Text>
             {session?.user.id !== selectedPublicProfile.id && (
-              <>
+              <View style={styles.profileActions}>
                 {friendStatus === "incoming" && selectedIncomingFriendRequest && (
                   <>
                     <PatchButton label={friendActionStatus === "saving" ? "SAVING..." : "ACCEPT FRIEND"} tone="green" onPress={() => respondToFriendRequest(selectedIncomingFriendRequest.id, "accept")} />
@@ -1567,9 +1673,13 @@ export default function App() {
                 ) : (
                   <Text style={styles.emptyState}>Add each other as friends to unlock DMs.</Text>
                 )}
-              </>
+              </View>
             )}
             <SectionHeader title="COMPLETED BARS" action={`${publicCompletedChallenges.length}`} />
+            <SectionHeader title="PATCH COLLECTIONS" action={`${publicPatchProgress.filter((collection) => collection.unlocked).length}/${publicPatchProgress.length}`} />
+            {publicPatchProgress.map((collection) => (
+              <PatchCollectionRow key={collection.id} collection={collection} />
+            ))}
             {publicCompletedChallenges.length === 0 && <Text style={styles.emptyState}>No completed bars shown yet.</Text>}
             {publicCompletedChallenges.map((challenge) => (
               <CompletedBarRow key={challenge.id} challenge={challenge} onPress={() => openChallenge(challenge.id)} />
@@ -1773,6 +1883,7 @@ export default function App() {
               />
               <Text style={styles.counter}>{planNote.length}/100</Text>
             </View>
+            {!!planCreateMessage && <Text style={styles.formNotice}>{planCreateMessage}</Text>}
             <PatchButton label={publishingPlan ? "PUBLISHING..." : "PUBLISH PLAN!"} tone="red" onPress={publishingPlan ? () => undefined : createPlan} />
           </DetailScreen>
         )}
@@ -1813,7 +1924,10 @@ export default function App() {
               onPress={selectedPlan.currentUserJoined || selectedPlan.attendees.includes(username) ? () => openChat(selectedPlan.id) : confirmJoinPlan}
             />
             {(selectedPlan.currentUserJoined || selectedPlan.attendees.includes(username)) && !currentUserStartedPlan && <OutlineButton label="LEAVE GROUP" onPress={confirmLeavePlan} />}
-            {currentUserStartedPlan && <OutlineButton label="CANCEL PLAN" onPress={cancelPlan} />}
+            {canCurrentUserCancelPlan && <OutlineButton label="CANCEL PLAN" onPress={cancelPlan} />}
+            {currentUserStartedPlan && !canCurrentUserCancelPlan && (
+              <Text style={styles.emptyState}>You can only cancel before anyone else joins.</Text>
+            )}
           </DetailScreen>
         )}
 
@@ -1832,7 +1946,7 @@ export default function App() {
           </AppScreen>
         )}
 
-        {screen === "chat" && (
+        {screen === "chat" && selectedPlan && (
           <View style={styles.chatScreen}>
             <View style={styles.chatHeader}>
               <View style={styles.chatHeaderTop}>
@@ -1919,6 +2033,13 @@ export default function App() {
           </View>
         )}
 
+        {screen === "chat" && !selectedPlan && (
+          <AppScreen title="CHATS">
+            <Text style={styles.emptyState}>This plan is no longer active.</Text>
+            <OutlineButton label="BACK TO CHATS" onPress={() => go("chats")} />
+          </AppScreen>
+        )}
+
         {screen === "dmThread" && (
           <View style={styles.chatScreen}>
             <View style={styles.chatHeader}>
@@ -1970,6 +2091,22 @@ export default function App() {
               </View>
               <View style={styles.tierPatch}><Text style={styles.tierSmall}>TIER</Text><Text style={styles.tierTitle}>{tier}</Text><Award color={colors.gold} size={28} /></View>
             </View>
+            <FieldLabel text="DISPLAY NAME" />
+            <TextInput
+              value={draftUsername}
+              onChangeText={(text) => setDraftUsername(text.slice(0, 24))}
+              style={[styles.singleLineInput, !usernameCooldown.canChange && styles.inputDisabled]}
+              editable={usernameCooldown.canChange}
+              placeholder="Display name"
+              placeholderTextColor={colors.muted}
+            />
+            <Text style={styles.inputHint}>
+              {usernameCooldown.canChange
+                ? usernameChanged
+                  ? "Saving will lock your display name for 30 days."
+                  : "You can change your display name once every 30 days."
+                : `Display name locked for ${usernameCooldown.daysLeft} more day${usernameCooldown.daysLeft === 1 ? "" : "s"}.`}
+            </Text>
             <FieldLabel text="PROFILE PATCH" />
             <View style={styles.avatarGrid}>
               {avatarOptions.map((item) => (
@@ -2001,13 +2138,10 @@ export default function App() {
             <Text style={styles.progressHint}>
               {rankProgress.remaining > 0 ? `${rankProgress.remaining.toLocaleString()} XP to ${rankProgress.next}` : "Max rank reached"}
             </Text>
-            <SectionHeader title="COSMETIC BADGES" action="See all" />
-            <View style={styles.badgeRow}>
-              <Badge icon="star" label="FIRST PLAN" tone="red" />
-              <Badge icon="crown" label="NIGHT OWL" tone="navy" />
-              <Badge icon="star" label="EARLY BIRD" tone="green" />
-              <Badge icon="cap" label="SOCIAL" tone="gold" />
-            </View>
+            <SectionHeader title="PATCH COLLECTIONS" action={`${patchProgress.filter((collection) => collection.unlocked).length}/${patchProgress.length}`} />
+            {patchProgress.map((collection) => (
+              <PatchCollectionRow key={collection.id} collection={collection} />
+            ))}
             <SectionHeader title="COMPLETED BARS" action="See all" onAction={() => go("completed")} />
             <CollectionRow icon="gem" title="HONOR LOG" value={`${completedBarIds.length} / ${catalog.length}`} progress={Math.min(completedBarIds.length, 10)} total={10} />
             <OutlineButton label="OPEN COMPLETED LOG" onPress={() => go("completed")} />
@@ -2576,6 +2710,34 @@ function CollectionRow({ icon, title, value, progress, total }: { icon: AvatarId
   return <View style={styles.collectionRow}><View style={styles.collectionIcon}><AvatarIcon avatar={icon} color={colors.green} size={20} /></View><View style={styles.flex}><Text style={styles.collectionTitle}>{title}</Text><View style={styles.stitchProgress}>{Array.from({ length: total }).map((_, index) => <View key={index} style={[styles.stitchUnit, index < progress && styles.stitchUnitDone]} />)}</View></View><Text style={styles.collectionValue}>{value}</Text></View>;
 }
 
+function PatchCollectionRow({
+  collection
+}: {
+  collection: ChallengeCollection & { total: number; completed: number; unlocked: boolean };
+}) {
+  const progress = collection.total > 0 ? Math.round((collection.completed / collection.total) * 100) : 0;
+
+  return (
+    <View style={[styles.patchCollectionRow, collection.unlocked && styles.patchCollectionRowUnlocked]}>
+      <View style={[styles.patchCollectionIcon, collection.unlocked && styles.patchCollectionIconUnlocked]}>
+        <AvatarIcon avatar={collection.unlocked ? "crown" : "star"} color={collection.unlocked ? colors.navy : colors.gold} size={22} />
+      </View>
+      <View style={styles.flex}>
+        <Text style={styles.collectionTitle}>{collection.badge || collection.name}</Text>
+        <Text style={styles.patchCollectionName}>{collection.name}</Text>
+        <Text style={styles.patchCollectionTagline}>{collection.tagline}</Text>
+        <View style={styles.collectionProgressTrack}>
+          <View style={[styles.collectionProgressFill, { width: `${progress}%` }]} />
+        </View>
+      </View>
+      <View style={styles.patchCollectionStat}>
+        <Text style={styles.collectionValue}>{collection.completed}/{collection.total}</Text>
+        <Text style={styles.patchCollectionBonus}>+{collection.bonusXp} XP</Text>
+      </View>
+    </View>
+  );
+}
+
 function CompletedBarRow({ challenge, onPress }: { challenge: Challenge; onPress: () => void }) {
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [styles.completedBarRow, pressedScale(pressed)]}>
@@ -2747,6 +2909,7 @@ const styles = StyleSheet.create({
   existingPlanRow: { borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 8, marginTop: 8 },
   existingPlanRowTitle: { color: colors.ink, fontSize: 12, fontWeight: "900" },
   existingPlanRowMeta: { color: colors.muted, fontSize: 11, fontWeight: "700", marginTop: 2 },
+  formNotice: { color: colors.ink, fontSize: 12, lineHeight: 17, backgroundColor: "#182B45", borderWidth: 1, borderColor: colors.gold, borderRadius: 8, padding: 10, marginTop: 10 },
   selectedChallengeTitle: { color: colors.ink, fontSize: 14, fontWeight: "900" },
   selectedChallengeMeta: { color: colors.muted, fontSize: 11, marginTop: 2 },
   selectedCheck: { backgroundColor: colors.navy, borderRadius: 12, padding: 3 },
@@ -2755,6 +2918,9 @@ const styles = StyleSheet.create({
   noteBox: { height: 54, borderWidth: 1, borderColor: colors.line, borderRadius: 7, backgroundColor: colors.paperLight, padding: 9 },
   noteInput: { flex: 1, color: colors.ink, fontSize: 12, padding: 0, textAlignVertical: "top" },
   noteText: { color: colors.ink, fontSize: 12 },
+  singleLineInput: { minHeight: 46, borderWidth: 1, borderColor: colors.line, borderRadius: 7, backgroundColor: colors.paperLight, color: colors.ink, fontSize: 14, fontWeight: "800", paddingHorizontal: 11 },
+  inputDisabled: { opacity: 0.62 },
+  inputHint: { color: colors.muted, fontSize: 11, lineHeight: 16, marginTop: 6, marginBottom: 2 },
   bioBox: { minHeight: 88, borderWidth: 1, borderColor: colors.line, borderRadius: 7, backgroundColor: colors.paperLight, padding: 9 },
   bioInput: { minHeight: 54, color: colors.ink, fontSize: 13, lineHeight: 18, padding: 0, textAlignVertical: "top" },
   counter: { alignSelf: "flex-end", color: colors.muted, fontSize: 10, marginTop: 7 },
@@ -2802,6 +2968,8 @@ const styles = StyleSheet.create({
   profileName: { color: colors.ink, fontSize: 22, fontWeight: "900" },
   profileMeta: { color: colors.ink, fontSize: 12 },
   profileBio: { color: colors.ink, fontSize: 13, lineHeight: 19, backgroundColor: colors.paperLight, borderWidth: 1, borderColor: colors.line, borderRadius: 7, padding: 10, marginTop: 12 },
+  profileStatGrid: { flexDirection: "row", gap: 8, marginTop: 14 },
+  profileActions: { gap: 8, marginTop: 12 },
   tierPatch: { width: 82, height: 92, backgroundColor: colors.navy, borderWidth: 2, borderColor: colors.gold, borderStyle: "dashed", borderRadius: 7, alignItems: "center", justifyContent: "center" },
   tierSmall: { color: colors.cream, fontSize: 10, fontWeight: "800" },
   tierTitle: { color: colors.cream, fontSize: 14, fontWeight: "900", marginVertical: 3 },
@@ -2816,6 +2984,16 @@ const styles = StyleSheet.create({
   collectionIcon: { width: 30, height: 30, borderRadius: 6, borderWidth: 1, borderColor: colors.line, alignItems: "center", justifyContent: "center" },
   collectionTitle: { color: colors.ink, fontSize: 12, fontWeight: "900" },
   collectionValue: { color: colors.ink, fontSize: 11, fontWeight: "900", fontVariant: ["tabular-nums"] },
+  patchCollectionRow: { flexDirection: "row", alignItems: "center", gap: 9, backgroundColor: colors.paperLight, borderWidth: 1, borderColor: colors.line, borderRadius: 8, padding: 10, marginBottom: 8 },
+  patchCollectionRowUnlocked: { borderColor: colors.gold, backgroundColor: "#172943" },
+  patchCollectionIcon: { width: 38, height: 38, borderRadius: 19, borderWidth: 1, borderColor: colors.gold, backgroundColor: colors.navy, alignItems: "center", justifyContent: "center" },
+  patchCollectionIconUnlocked: { backgroundColor: colors.gold },
+  patchCollectionName: { color: colors.ink, fontSize: 11, fontWeight: "800", marginTop: 2 },
+  patchCollectionTagline: { color: colors.muted, fontSize: 10, lineHeight: 14, marginTop: 3 },
+  patchCollectionStat: { alignItems: "flex-end", gap: 4, minWidth: 54 },
+  patchCollectionBonus: { color: colors.gold, fontSize: 10, fontWeight: "900" },
+  collectionProgressTrack: { height: 5, backgroundColor: "#26384F", borderRadius: 3, marginTop: 7, overflow: "hidden" },
+  collectionProgressFill: { height: "100%", backgroundColor: colors.green },
   completedBarRow: { flexDirection: "row", alignItems: "center", gap: 9, backgroundColor: colors.paperLight, borderWidth: 1, borderColor: colors.gold, borderRadius: 7, padding: 9, marginBottom: 7 },
   completedBarIcon: { width: 30, height: 30, borderRadius: 15, backgroundColor: colors.green, alignItems: "center", justifyContent: "center" },
   completedBarTitle: { color: colors.ink, fontSize: 13, fontWeight: "900" },

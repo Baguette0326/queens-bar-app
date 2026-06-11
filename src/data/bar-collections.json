@@ -1,0 +1,127 @@
+[
+  {
+    "id": "tutorial-island",
+    "name": "Tutorial Island",
+    "tagline": "Low-stakes starter chaos for people still reading the wiki.",
+    "barsIncluded": [
+      "No Hablo",
+      "Rocky Road",
+      "Slam It Home"
+    ],
+    "barCount": 3,
+    "difficultyMix": "Easy: 3",
+    "bonusXp": 150,
+    "badge": "Tiny Crown Patch",
+    "designNotes": "Starter-friendly set; good for onboarding users into collections."
+  },
+  {
+    "id": "clark-hall-subscription-plan",
+    "name": "Clark Hall Subscription Plan",
+    "tagline": "For users who accidentally became part of the furniture at Clark.",
+    "barsIncluded": [
+      "Advance To Goodes",
+      "Clark Decagaon",
+      "Ritual",
+      "Tir Na Nog"
+    ],
+    "barCount": 4,
+    "difficultyMix": "Legendary: 1, Medium: 3",
+    "bonusXp": 450,
+    "badge": "Clark Regular Stamp",
+    "designNotes": "Campus/place-based set centered around recurring Queen's/Clark-style lore."
+  },
+  {
+    "id": "couch-potato-canon-event",
+    "name": "Couch Potato Canon Event",
+    "tagline": "Movie-marathon brainrot, but make it a tradition.",
+    "barsIncluded": [
+      "Drink to the Future",
+      "Fellowship",
+      "Raiders",
+      "Iron Throne",
+      "Hero of Canton"
+    ],
+    "barCount": 5,
+    "difficultyMix": "Hard: 1, Legendary: 1, Medium: 3",
+    "bonusXp": 500,
+    "badge": "Remote Control Relic",
+    "designNotes": "Pop-culture and watch-through set; funny, themed, and easy to understand in-app."
+  },
+  {
+    "id": "controller-damage-waiver",
+    "name": "Controller Damage Waiver",
+    "tagline": "Friendships were tested. Controllers may not survive.",
+    "barsIncluded": [
+      "Beerio Kart",
+      "Party Star",
+      "Smashed Bros"
+    ],
+    "barCount": 3,
+    "difficultyMix": "Medium: 3",
+    "bonusXp": 300,
+    "badge": "Joystick Patch",
+    "designNotes": "Gaming/social set; compact enough to feel achievable."
+  },
+  {
+    "id": "jacket-construction-permit",
+    "name": "Jacket Construction Permit",
+    "tagline": "For people who saw empty cans and thought: infrastructure.",
+    "barsIncluded": [
+      "Beer Belt",
+      "Beerlin Wall",
+      "Brew Master",
+      "God of the Sea",
+      "Isengard",
+      "Iron Curtain",
+      "Totem",
+      "Wizard"
+    ],
+    "barCount": 8,
+    "difficultyMix": "Hard: 5, Legendary: 3",
+    "bonusXp": 900,
+    "badge": "Structural Engineer Patch",
+    "designNotes": "Build/craft/physical-object traditions; stronger mid-to-late-game collection."
+  },
+  {
+    "id": "residence-side-quest-any",
+    "name": "Residence Side-Quest Any%",
+    "tagline": "The residence lore iceberg, unfortunately, is real.",
+    "barsIncluded": [
+      "Cuffed",
+      "Frost Week",
+      "Last Man Standing",
+      "Lumberjack",
+      "Naked Knights",
+      "Smooth Criminal",
+      "Squeaky Clean"
+    ],
+    "barCount": 7,
+    "difficultyMix": "Hard: 4, Legendary: 2, Medium: 1",
+    "bonusXp": 800,
+    "badge": "Rez Goblin Badge",
+    "designNotes": "Residence/social-lore set; several items may need safer rewrites before MVP use."
+  },
+  {
+    "id": "final-boss-liver-dlc",
+    "name": "Final Boss Liver DLC",
+    "tagline": "The wiki looked at moderation and chose violence.",
+    "barsIncluded": [
+      "21 Gun Salute",
+      "Century Club",
+      "21st Century",
+      "21st Century Wizard",
+      "40 Beers",
+      "Heineken Hammer",
+      "Home For a Rest",
+      "ILCBO",
+      "DUSTED",
+      "Tap Master",
+      "White Wizard"
+    ],
+    "barCount": 11,
+    "difficultyMix": "Hard: 3, Legendary: 8",
+    "bonusXp": 1200,
+    "badge": "Final Boss Patch",
+    "designNotes": "Highest-intensity legacy set. Treat as reference/lore unless rewritten safely for the app."
+  }
+]

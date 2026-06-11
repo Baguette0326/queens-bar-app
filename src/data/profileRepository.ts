@@ -13,6 +13,7 @@ export type Profile = {
   bio: string | null;
   xp: number;
   tier: string;
+  username_changed_at: string | null;
   accepted_guidelines_at: string | null;
 };
 
@@ -29,19 +30,25 @@ export type ProfileInput = {
 
 export type ProfileDetailsInput = {
   userId: string;
+  username?: string;
+  updateUsername?: boolean;
   avatar: AvatarId;
   bio: string;
 };
 
-const profileSelect = "id,username,avatar,role,faculty,program,year_label,default_area,bio,xp,tier,accepted_guidelines_at";
+const profileSelect = "id,username,avatar,role,faculty,program,year_label,default_area,bio,xp,tier,username_changed_at,accepted_guidelines_at";
 const legacyProfileSelect = "id,username,avatar,role,faculty,program,year_label,default_area,xp,tier,accepted_guidelines_at";
 
 function isMissingBioColumn(error: unknown) {
   return typeof error === "object" && error !== null && "message" in error && String(error.message).toLowerCase().includes("bio");
 }
 
-function withBio(profile: Omit<Profile, "bio"> & { bio?: string | null }) {
-  return { ...profile, bio: profile.bio ?? null } as Profile;
+function isMissingUsernameChangedColumn(error: unknown) {
+  return typeof error === "object" && error !== null && "message" in error && String(error.message).toLowerCase().includes("username_changed_at");
+}
+
+function withProfileDefaults(profile: Omit<Profile, "bio" | "username_changed_at"> & { bio?: string | null; username_changed_at?: string | null }) {
+  return { ...profile, bio: profile.bio ?? null, username_changed_at: profile.username_changed_at ?? null } as Profile;
 }
 
 export function getRankFromXp(xp: number) {
@@ -72,8 +79,8 @@ export async function fetchProfile(userId: string) {
     .eq("id", userId)
     .maybeSingle();
 
-  if (!error) return data ? withBio(data as Omit<Profile, "bio"> & { bio?: string | null }) : null;
-  if (!isMissingBioColumn(error)) throw error;
+  if (!error) return data ? withProfileDefaults(data as Omit<Profile, "bio" | "username_changed_at"> & { bio?: string | null; username_changed_at?: string | null }) : null;
+  if (!isMissingBioColumn(error) && !isMissingUsernameChangedColumn(error)) throw error;
 
   const { data: legacyData, error: legacyError } = await supabase
     .from("profiles")
@@ -82,7 +89,7 @@ export async function fetchProfile(userId: string) {
     .maybeSingle();
 
   if (legacyError) throw legacyError;
-  return legacyData ? withBio(legacyData as Omit<Profile, "bio">) : null;
+  return legacyData ? withProfileDefaults(legacyData as Omit<Profile, "bio" | "username_changed_at">) : null;
 }
 
 export async function createProfile(input: ProfileInput) {
@@ -106,8 +113,8 @@ export async function createProfile(input: ProfileInput) {
     .select(profileSelect)
     .single();
 
-  if (!error) return withBio(data as Omit<Profile, "bio"> & { bio?: string | null });
-  if (!isMissingBioColumn(error)) throw error;
+  if (!error) return withProfileDefaults(data as Omit<Profile, "bio" | "username_changed_at"> & { bio?: string | null; username_changed_at?: string | null });
+  if (!isMissingBioColumn(error) && !isMissingUsernameChangedColumn(error)) throw error;
 
   const { data: legacyData, error: legacyError } = await supabase
     .from("profiles")
@@ -116,7 +123,7 @@ export async function createProfile(input: ProfileInput) {
     .single();
 
   if (legacyError) throw legacyError;
-  return withBio(legacyData as Omit<Profile, "bio">);
+  return withProfileDefaults(legacyData as Omit<Profile, "bio" | "username_changed_at">);
 }
 
 export async function updateProfileXp(userId: string, xp: number) {
@@ -128,8 +135,8 @@ export async function updateProfileXp(userId: string, xp: number) {
     .select(profileSelect)
     .single();
 
-  if (!error) return withBio(data as Omit<Profile, "bio"> & { bio?: string | null });
-  if (!isMissingBioColumn(error)) throw error;
+  if (!error) return withProfileDefaults(data as Omit<Profile, "bio" | "username_changed_at"> & { bio?: string | null; username_changed_at?: string | null });
+  if (!isMissingBioColumn(error) && !isMissingUsernameChangedColumn(error)) throw error;
 
   const { data: legacyData, error: legacyError } = await supabase
     .from("profiles")
@@ -139,27 +146,43 @@ export async function updateProfileXp(userId: string, xp: number) {
     .single();
 
   if (legacyError) throw legacyError;
-  return withBio(legacyData as Omit<Profile, "bio">);
+  return withProfileDefaults(legacyData as Omit<Profile, "bio" | "username_changed_at">);
 }
 
 export async function updateProfileDetails(input: ProfileDetailsInput) {
+  const updates: {
+    username?: string;
+    username_changed_at?: string;
+    avatar: AvatarId;
+    bio: string | null;
+    updated_at: string;
+  } = {
+    avatar: input.avatar,
+    bio: input.bio.trim() || null,
+    updated_at: new Date().toISOString()
+  };
+
+  if (input.updateUsername && input.username?.trim()) {
+    updates.username = input.username.trim();
+    updates.username_changed_at = updates.updated_at;
+  }
+
   const { data, error } = await supabase
     .from("profiles")
-    .update({
-      avatar: input.avatar,
-      bio: input.bio.trim() || null,
-      updated_at: new Date().toISOString()
-    })
+    .update(updates)
     .eq("id", input.userId)
     .select(profileSelect)
     .single();
 
-  if (!error) return withBio(data as Omit<Profile, "bio"> & { bio?: string | null });
-  if (!isMissingBioColumn(error)) throw error;
+  if (!error) return withProfileDefaults(data as Omit<Profile, "bio" | "username_changed_at"> & { bio?: string | null; username_changed_at?: string | null });
+  if (!isMissingBioColumn(error) && !isMissingUsernameChangedColumn(error)) throw error;
 
   const { data: legacyData, error: legacyError } = await supabase
     .from("profiles")
     .update({
+      ...(input.updateUsername && input.username?.trim()
+        ? { username: input.username.trim() }
+        : {}),
       avatar: input.avatar,
       updated_at: new Date().toISOString()
     })
@@ -168,5 +191,5 @@ export async function updateProfileDetails(input: ProfileDetailsInput) {
     .single();
 
   if (legacyError) throw legacyError;
-  return withBio(legacyData as Omit<Profile, "bio">);
+  return withProfileDefaults(legacyData as Omit<Profile, "bio" | "username_changed_at">);
 }

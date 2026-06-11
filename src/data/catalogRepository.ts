@@ -59,7 +59,11 @@ function rowToChallenge(row: CatalogBarRow, index: number): Challenge {
     tone: toneCycle[index % toneCycle.length],
     icon: iconCycle[index % iconCycle.length],
     sourceUrl: row.wiki_url,
-    reviewed: row.reviewed
+    reviewed: row.reviewed,
+    collectionSet: sheetRow?.collectionSet,
+    setBonusXp: sheetRow?.setBonusXp,
+    collectionBadge: sheetRow?.collectionBadge,
+    collectionTagline: sheetRow?.collectionTagline
   };
 }
 

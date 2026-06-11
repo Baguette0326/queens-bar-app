@@ -5,7 +5,11 @@
     "sourceUrl": "https://gpabars.fandom.com/wiki/21_Gun_Salute",
     "difficulty": "hard",
     "xp": 400,
-    "publish": true
+    "publish": true,
+    "collectionSet": "Final Boss Liver DLC",
+    "setBonusXp": 1200,
+    "collectionBadge": "Final Boss Patch",
+    "collectionTagline": "The wiki looked at moderation and chose violence."
   },
   {
     "name": "21st Century",
@@ -13,7 +17,11 @@
     "sourceUrl": "https://gpabars.fandom.com/wiki/21st_Century",
     "difficulty": "legendary",
     "xp": 475,
-    "publish": true
+    "publish": true,
+    "collectionSet": "Final Boss Liver DLC",
+    "setBonusXp": 1200,
+    "collectionBadge": "Final Boss Patch",
+    "collectionTagline": "The wiki looked at moderation and chose violence."
   },
   {
     "name": "21st Century Wizard",
@@ -21,7 +29,11 @@
     "sourceUrl": "https://gpabars.fandom.com/wiki/21st_Century_Wizard",
     "difficulty": "legendary",
     "xp": 500,
-    "publish": true
+    "publish": true,
+    "collectionSet": "Final Boss Liver DLC",
+    "setBonusXp": 1200,
+    "collectionBadge": "Final Boss Patch",
+    "collectionTagline": "The wiki looked at moderation and chose violence."
   },
   {
     "name": "40 Beers",
@@ -29,7 +41,11 @@
     "sourceUrl": "https://gpabars.fandom.com/wiki/40_Beers",
     "difficulty": "legendary",
     "xp": 500,
-    "publish": true
+    "publish": true,
+    "collectionSet": "Final Boss Liver DLC",
+    "setBonusXp": 1200,
+    "collectionBadge": "Final Boss Patch",
+    "collectionTagline": "The wiki looked at moderation and chose violence."
   },
   {
     "name": "Advance To Goodes",
@@ -37,7 +53,11 @@
     "sourceUrl": "https://gpabars.fandom.com/wiki/Advance_To_Goodes",
     "difficulty": "medium",
     "xp": 225,
-    "publish": true
+    "publish": true,
+    "collectionSet": "Clark Hall Subscription Plan",
+    "setBonusXp": 450,
+    "collectionBadge": "Clark Regular Stamp",
+    "collectionTagline": "For users who accidentally became part of the furniture at Clark."
   },
   {
     "name": "Beer Belt",
@@ -45,15 +65,23 @@
     "sourceUrl": "https://gpabars.fandom.com/wiki/Beer_Belt",
     "difficulty": "hard",
     "xp": 425,
-    "publish": true
+    "publish": true,
+    "collectionSet": "Jacket Construction Permit",
+    "setBonusXp": 900,
+    "collectionBadge": "Structural Engineer Patch",
+    "collectionTagline": "For people who saw empty cans and thought: infrastructure."
   },
   {
     "name": "Beerio Kart",
-    "description": "Beerio Kart (also known as Grand Pre, KUI, Don't Drink and Drive, and others) is a set of drinking games to be played alongside Mario Kart.There are many variations to this game however the core element is that you must drink an entire beer within the duration of a single Mario Kart race. However, you cannot drink your beer and drive your kart (have your hands on the controller) at the same time. Addtional Rules: Any additional rules or modifications can be added to the core game. Some additonal rules are listed below.Winner of race is exempt from drinking (once only) An additional shot of beer is taken for being hit by an item Last place in a race takes a shot of hard liquor Players must pull over on the right side of the road and come to a complete stop before drinking",
+    "description": "Beerio Kart (also known as Grand Pre, KUI, Don't Drink and Drive, and others) is a set of drinking games to be played alongside Mario Kart.There are many variations to this game however the core element is that you must drink an entire beer within the duration of a single Mario Kart race. However, you cannot drink your beer and drive your kart (have your hands on the controller) at the same time. Addtional Rules: Any additional rules or modifications can be added to the core game. Some additonal rules are listed below.Winner of race is exempt from drinking (once only)\n An additional shot of beer is taken for being hit by an item\n Last place in a race takes a shot of hard liquor\n Players must pull over on the right side of the road and come to a complete stop before drinking",
     "sourceUrl": "https://gpabars.fandom.com/wiki/Beerio_Kart",
     "difficulty": "medium",
     "xp": 200,
-    "publish": true
+    "publish": true,
+    "collectionSet": "Controller Damage Waiver",
+    "setBonusXp": 300,
+    "collectionBadge": "Joystick Patch",
+    "collectionTagline": "Friendships were tested. Controllers may not survive."
   },
   {
     "name": "Beerlin Wall",
@@ -61,7 +89,11 @@
     "sourceUrl": "https://gpabars.fandom.com/wiki/Beerlin_Wall",
     "difficulty": "hard",
     "xp": 350,
-    "publish": true
+    "publish": true,
+    "collectionSet": "Jacket Construction Permit",
+    "setBonusXp": 900,
+    "collectionBadge": "Structural Engineer Patch",
+    "collectionTagline": "For people who saw empty cans and thought: infrastructure."
   },
   {
     "name": "Brew Master",
@@ -69,7 +101,11 @@
     "sourceUrl": "https://gpabars.fandom.com/wiki/Brew_Master",
     "difficulty": "hard",
     "xp": 375,
-    "publish": true
+    "publish": true,
+    "collectionSet": "Jacket Construction Permit",
+    "setBonusXp": 900,
+    "collectionBadge": "Structural Engineer Patch",
+    "collectionTagline": "For people who saw empty cans and thought: infrastructure."
   },
   {
     "name": "Century Club",
@@ -77,7 +113,11 @@
     "sourceUrl": "https://gpabars.fandom.com/wiki/Century_Club",
     "difficulty": "hard",
     "xp": 425,
-    "publish": true
+    "publish": true,
+    "collectionSet": "Final Boss Liver DLC",
+    "setBonusXp": 1200,
+    "collectionBadge": "Final Boss Patch",
+    "collectionTagline": "The wiki looked at moderation and chose violence."
   },
   {
     "name": "Clark Decagaon",
@@ -85,15 +125,23 @@
     "sourceUrl": "https://gpabars.fandom.com/wiki/Clark_Decagon",
     "difficulty": "legendary",
     "xp": 450,
-    "publish": true
+    "publish": true,
+    "collectionSet": "Clark Hall Subscription Plan",
+    "setBonusXp": 450,
+    "collectionBadge": "Clark Regular Stamp",
+    "collectionTagline": "For users who accidentally became part of the furniture at Clark."
   },
   {
     "name": "Cuffed",
-    "description": "It's cuffing season baby! Spend 24 straight hours handcuffed to your best bud. In said time you must match each other drink for drink. Bonus points for a bottle of wine each, because that shit's romantic. No removing the handcuffs for any reason, so don't break the seal early. Makeshift handcuffs are allowed but make them sturdy, because you can't bear to be without your other half for even a second. Chaining more than 2 people together qualifies you for Cuffed^x",
+    "description": "It's cuffing season baby! Spend 24 straight hours handcuffed to your best bud. In said time you must match each other drink for drink. Bonus points for a bottle of wine each, because that shit's romantic. No removing the handcuffs for any reason, so don't break the seal early. Makeshift handcuffs are allowed but make them sturdy, because you can't bear to be without your other half for even a second.  Chaining more than 2 people together qualifies you for Cuffed^x",
     "sourceUrl": "https://gpabars.fandom.com/wiki/Cuffed",
     "difficulty": "hard",
     "xp": 400,
-    "publish": true
+    "publish": true,
+    "collectionSet": "Residence Side-Quest Any%",
+    "setBonusXp": 800,
+    "collectionBadge": "Rez Goblin Badge",
+    "collectionTagline": "The residence lore iceberg, unfortunately, is real."
   },
   {
     "name": "Drink to the Future",
@@ -101,7 +149,11 @@
     "sourceUrl": "https://gpabars.fandom.com/wiki/Drink_to_the_Future",
     "difficulty": "medium",
     "xp": 225,
-    "publish": true
+    "publish": true,
+    "collectionSet": "Couch Potato Canon Event",
+    "setBonusXp": 500,
+    "collectionBadge": "Remote Control Relic",
+    "collectionTagline": "Movie-marathon brainrot, but make it a tradition."
   },
   {
     "name": "DUSTED",
@@ -109,7 +161,11 @@
     "sourceUrl": "https://gpabars.fandom.com/wiki/DUSTED",
     "difficulty": "hard",
     "xp": 400,
-    "publish": true
+    "publish": true,
+    "collectionSet": "Final Boss Liver DLC",
+    "setBonusXp": 1200,
+    "collectionBadge": "Final Boss Patch",
+    "collectionTagline": "The wiki looked at moderation and chose violence."
   },
   {
     "name": "Fellowship",
@@ -117,15 +173,23 @@
     "sourceUrl": "https://gpabars.fandom.com/wiki/Fellowship",
     "difficulty": "legendary",
     "xp": 450,
-    "publish": true
+    "publish": true,
+    "collectionSet": "Couch Potato Canon Event",
+    "setBonusXp": 500,
+    "collectionBadge": "Remote Control Relic",
+    "collectionTagline": "Movie-marathon brainrot, but make it a tradition."
   },
   {
     "name": "Frost Week",
-    "description": "Frost Week is for those brave enough to face the elements in the most epic of clothing, The GPA.To obtain \"Frost Week\" one must don sandals (add socks for 10/10 eng fashion), a bathing suit a dank AF muscle shirt (or shirtless), and of course, their Golden Party Armour. If you're feeling adventurous you can also wear aviators for extra style points and general badass-ery.They must wear this from the time of their first class of the first week of the winter semester, to the time of their final class of that same week (i.e. 8:30 am Monday to 5:30 pm Friday).",
+    "description": "Frost Week is for those brave enough to face the elements in the most epic of clothing,  The GPA.To obtain \"Frost Week\" one must don sandals (add socks for 10/10 eng fashion), a bathing suit a dank AF muscle shirt (or shirtless), and of course, their Golden Party Armour.  If you're feeling adventurous you can also wear aviators for extra style points and general badass-ery.They must wear this from the time of their first class of the first week of the winter semester, to the time of their final class of that same week (i.e. 8:30 am Monday to 5:30 pm Friday).",
     "sourceUrl": "https://gpabars.fandom.com/wiki/Frost_Week",
     "difficulty": "hard",
     "xp": 425,
-    "publish": true
+    "publish": true,
+    "collectionSet": "Residence Side-Quest Any%",
+    "setBonusXp": 800,
+    "collectionBadge": "Rez Goblin Badge",
+    "collectionTagline": "The residence lore iceberg, unfortunately, is real."
   },
   {
     "name": "God of the Sea",
@@ -133,7 +197,11 @@
     "sourceUrl": "https://gpabars.fandom.com/wiki/God_Of_The_Sea",
     "difficulty": "legendary",
     "xp": 450,
-    "publish": true
+    "publish": true,
+    "collectionSet": "Jacket Construction Permit",
+    "setBonusXp": 900,
+    "collectionBadge": "Structural Engineer Patch",
+    "collectionTagline": "For people who saw empty cans and thought: infrastructure."
   },
   {
     "name": "Heineken Hammer",
@@ -141,7 +209,11 @@
     "sourceUrl": "https://gpabars.fandom.com/wiki/Heineken_Hammer",
     "difficulty": "legendary",
     "xp": 450,
-    "publish": true
+    "publish": true,
+    "collectionSet": "Final Boss Liver DLC",
+    "setBonusXp": 1200,
+    "collectionBadge": "Final Boss Patch",
+    "collectionTagline": "The wiki looked at moderation and chose violence."
   },
   {
     "name": "Hero of Canton",
@@ -149,7 +221,11 @@
     "sourceUrl": "https://gpabars.fandom.com/wiki/Hero_of_Canton",
     "difficulty": "hard",
     "xp": 400,
-    "publish": true
+    "publish": true,
+    "collectionSet": "Couch Potato Canon Event",
+    "setBonusXp": 500,
+    "collectionBadge": "Remote Control Relic",
+    "collectionTagline": "Movie-marathon brainrot, but make it a tradition."
   },
   {
     "name": "Home For a Rest",
@@ -157,7 +233,11 @@
     "sourceUrl": "https://gpabars.fandom.com/wiki/Home_For_A_Rest",
     "difficulty": "legendary",
     "xp": 450,
-    "publish": true
+    "publish": true,
+    "collectionSet": "Final Boss Liver DLC",
+    "setBonusXp": 1200,
+    "collectionBadge": "Final Boss Patch",
+    "collectionTagline": "The wiki looked at moderation and chose violence."
   },
   {
     "name": "ILCBO",
@@ -165,7 +245,11 @@
     "sourceUrl": "https://gpabars.fandom.com/wiki/ILCBO",
     "difficulty": "legendary",
     "xp": 450,
-    "publish": true
+    "publish": true,
+    "collectionSet": "Final Boss Liver DLC",
+    "setBonusXp": 1200,
+    "collectionBadge": "Final Boss Patch",
+    "collectionTagline": "The wiki looked at moderation and chose violence."
   },
   {
     "name": "Isengard",
@@ -173,7 +257,11 @@
     "sourceUrl": "https://gpabars.fandom.com/wiki/Isengard",
     "difficulty": "hard",
     "xp": 400,
-    "publish": true
+    "publish": true,
+    "collectionSet": "Jacket Construction Permit",
+    "setBonusXp": 900,
+    "collectionBadge": "Structural Engineer Patch",
+    "collectionTagline": "For people who saw empty cans and thought: infrastructure."
   },
   {
     "name": "Iron Curtain",
@@ -181,7 +269,11 @@
     "sourceUrl": "https://gpabars.fandom.com/wiki/Iron_Curtain",
     "difficulty": "hard",
     "xp": 350,
-    "publish": true
+    "publish": true,
+    "collectionSet": "Jacket Construction Permit",
+    "setBonusXp": 900,
+    "collectionBadge": "Structural Engineer Patch",
+    "collectionTagline": "For people who saw empty cans and thought: infrastructure."
   },
   {
     "name": "Iron Throne",
@@ -189,7 +281,11 @@
     "sourceUrl": "https://gpabars.fandom.com/wiki/Iron_Throne",
     "difficulty": "medium",
     "xp": 225,
-    "publish": true
+    "publish": true,
+    "collectionSet": "Couch Potato Canon Event",
+    "setBonusXp": 500,
+    "collectionBadge": "Remote Control Relic",
+    "collectionTagline": "Movie-marathon brainrot, but make it a tradition."
   },
   {
     "name": "Last Man Standing",
@@ -197,7 +293,11 @@
     "sourceUrl": "https://gpabars.fandom.com/wiki/Last_Man_Standing",
     "difficulty": "hard",
     "xp": 425,
-    "publish": true
+    "publish": true,
+    "collectionSet": "Residence Side-Quest Any%",
+    "setBonusXp": 800,
+    "collectionBadge": "Rez Goblin Badge",
+    "collectionTagline": "The residence lore iceberg, unfortunately, is real."
   },
   {
     "name": "Lumberjack",
@@ -205,7 +305,11 @@
     "sourceUrl": "https://gpabars.fandom.com/wiki/Lumberjack",
     "difficulty": "medium",
     "xp": 250,
-    "publish": true
+    "publish": true,
+    "collectionSet": "Residence Side-Quest Any%",
+    "setBonusXp": 800,
+    "collectionBadge": "Rez Goblin Badge",
+    "collectionTagline": "The residence lore iceberg, unfortunately, is real."
   },
   {
     "name": "Naked Knights",
@@ -213,7 +317,11 @@
     "sourceUrl": "https://gpabars.fandom.com/wiki/Naked_Knights",
     "difficulty": "legendary",
     "xp": 500,
-    "publish": true
+    "publish": true,
+    "collectionSet": "Residence Side-Quest Any%",
+    "setBonusXp": 800,
+    "collectionBadge": "Rez Goblin Badge",
+    "collectionTagline": "The residence lore iceberg, unfortunately, is real."
   },
   {
     "name": "No Hablo",
@@ -221,7 +329,11 @@
     "sourceUrl": "https://gpabars.fandom.com/wiki/No_Hablo",
     "difficulty": "easy",
     "xp": 75,
-    "publish": true
+    "publish": true,
+    "collectionSet": "Tutorial Island",
+    "setBonusXp": 150,
+    "collectionBadge": "Tiny Crown Patch",
+    "collectionTagline": "Low-stakes starter chaos for people still reading the wiki."
   },
   {
     "name": "Party Star",
@@ -229,7 +341,11 @@
     "sourceUrl": "https://gpabars.fandom.com/wiki/Party_Star",
     "difficulty": "medium",
     "xp": 200,
-    "publish": true
+    "publish": true,
+    "collectionSet": "Controller Damage Waiver",
+    "setBonusXp": 300,
+    "collectionBadge": "Joystick Patch",
+    "collectionTagline": "Friendships were tested. Controllers may not survive."
   },
   {
     "name": "Raiders",
@@ -237,7 +353,11 @@
     "sourceUrl": "https://gpabars.fandom.com/wiki/Raiders",
     "difficulty": "medium",
     "xp": 200,
-    "publish": true
+    "publish": true,
+    "collectionSet": "Couch Potato Canon Event",
+    "setBonusXp": 500,
+    "collectionBadge": "Remote Control Relic",
+    "collectionTagline": "Movie-marathon brainrot, but make it a tradition."
   },
   {
     "name": "Ritual",
@@ -245,7 +365,11 @@
     "sourceUrl": "https://gpabars.fandom.com/wiki/Ritual",
     "difficulty": "medium",
     "xp": 250,
-    "publish": true
+    "publish": true,
+    "collectionSet": "Clark Hall Subscription Plan",
+    "setBonusXp": 450,
+    "collectionBadge": "Clark Regular Stamp",
+    "collectionTagline": "For users who accidentally became part of the furniture at Clark."
   },
   {
     "name": "Rocky Road",
@@ -253,7 +377,11 @@
     "sourceUrl": "https://gpabars.fandom.com/wiki/Rocky_Road",
     "difficulty": "easy",
     "xp": 100,
-    "publish": true
+    "publish": true,
+    "collectionSet": "Tutorial Island",
+    "setBonusXp": 150,
+    "collectionBadge": "Tiny Crown Patch",
+    "collectionTagline": "Low-stakes starter chaos for people still reading the wiki."
   },
   {
     "name": "Slam It Home",
@@ -261,7 +389,11 @@
     "sourceUrl": "https://gpabars.fandom.com/wiki/Slam_It_Home",
     "difficulty": "easy",
     "xp": 100,
-    "publish": true
+    "publish": true,
+    "collectionSet": "Tutorial Island",
+    "setBonusXp": 150,
+    "collectionBadge": "Tiny Crown Patch",
+    "collectionTagline": "Low-stakes starter chaos for people still reading the wiki."
   },
   {
     "name": "Smashed Bros",
@@ -269,7 +401,11 @@
     "sourceUrl": "https://gpabars.fandom.com/wiki/Smashed_Bros",
     "difficulty": "medium",
     "xp": 225,
-    "publish": true
+    "publish": true,
+    "collectionSet": "Controller Damage Waiver",
+    "setBonusXp": 300,
+    "collectionBadge": "Joystick Patch",
+    "collectionTagline": "Friendships were tested. Controllers may not survive."
   },
   {
     "name": "Smooth Criminal",
@@ -277,7 +413,11 @@
     "sourceUrl": "https://gpabars.fandom.com/wiki/Smooth_Criminal",
     "difficulty": "legendary",
     "xp": 450,
-    "publish": true
+    "publish": true,
+    "collectionSet": "Residence Side-Quest Any%",
+    "setBonusXp": 800,
+    "collectionBadge": "Rez Goblin Badge",
+    "collectionTagline": "The residence lore iceberg, unfortunately, is real."
   },
   {
     "name": "Squeaky Clean",
@@ -285,7 +425,11 @@
     "sourceUrl": "https://gpabars.fandom.com/wiki/Squeaky_Clean",
     "difficulty": "hard",
     "xp": 400,
-    "publish": true
+    "publish": true,
+    "collectionSet": "Residence Side-Quest Any%",
+    "setBonusXp": 800,
+    "collectionBadge": "Rez Goblin Badge",
+    "collectionTagline": "The residence lore iceberg, unfortunately, is real."
   },
   {
     "name": "Tap Master",
@@ -293,7 +437,11 @@
     "sourceUrl": "https://gpabars.fandom.com/wiki/Tap_Master",
     "difficulty": "legendary",
     "xp": 500,
-    "publish": true
+    "publish": true,
+    "collectionSet": "Final Boss Liver DLC",
+    "setBonusXp": 1200,
+    "collectionBadge": "Final Boss Patch",
+    "collectionTagline": "The wiki looked at moderation and chose violence."
   },
   {
     "name": "Tir Na Nog",
@@ -301,7 +449,11 @@
     "sourceUrl": "https://gpabars.fandom.com/wiki/Tir_Na_Nog",
     "difficulty": "medium",
     "xp": 175,
-    "publish": true
+    "publish": true,
+    "collectionSet": "Clark Hall Subscription Plan",
+    "setBonusXp": 450,
+    "collectionBadge": "Clark Regular Stamp",
+    "collectionTagline": "For users who accidentally became part of the furniture at Clark."
   },
   {
     "name": "Totem",
@@ -309,7 +461,11 @@
     "sourceUrl": "https://gpabars.fandom.com/wiki/Totem",
     "difficulty": "legendary",
     "xp": 500,
-    "publish": true
+    "publish": true,
+    "collectionSet": "Jacket Construction Permit",
+    "setBonusXp": 900,
+    "collectionBadge": "Structural Engineer Patch",
+    "collectionTagline": "For people who saw empty cans and thought: infrastructure."
   },
   {
     "name": "White Wizard",
@@ -317,7 +473,11 @@
     "sourceUrl": "https://gpabars.fandom.com/wiki/White_Wizard",
     "difficulty": "legendary",
     "xp": 500,
-    "publish": true
+    "publish": true,
+    "collectionSet": "Final Boss Liver DLC",
+    "setBonusXp": 1200,
+    "collectionBadge": "Final Boss Patch",
+    "collectionTagline": "The wiki looked at moderation and chose violence."
   },
   {
     "name": "Wizard",
@@ -325,6 +485,10 @@
     "sourceUrl": "https://gpabars.fandom.com/wiki/Wizard",
     "difficulty": "legendary",
     "xp": 450,
-    "publish": true
+    "publish": true,
+    "collectionSet": "Jacket Construction Permit",
+    "setBonusXp": 900,
+    "collectionBadge": "Structural Engineer Patch",
+    "collectionTagline": "For people who saw empty cans and thought: infrastructure."
   }
 ]

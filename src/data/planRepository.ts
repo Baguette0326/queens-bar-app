@@ -116,32 +116,29 @@ export async function fetchPlans(currentUserId?: string) {
     .order("starts_at", { ascending: true });
 
   if (error) throw error;
-  return (data ?? []).map((row) => rowToPlan(row as unknown as PlanRow, currentUserId));
+  return (data ?? [])
+    .map((row) => rowToPlan(row as unknown as PlanRow, currentUserId))
+    .filter((plan) => plan.attendeeProfiles.length > 0);
 }
 
 export async function createPlan(input: CreatePlanInput) {
-  const { data: plan, error } = await supabase
-    .from("plans")
-    .insert({
-      catalog_bar_id: input.catalogBarId,
-      started_by: input.userId,
-      location_name: input.locationName,
-      location_detail: input.locationDetail,
-      starts_at: input.startsAt.toISOString(),
-      ends_at: input.endsAt.toISOString(),
-      cap: input.cap,
-      note: input.note,
-      visibility: input.visibility,
-      status: input.startsAt <= new Date() ? "ongoing" : "upcoming"
-    })
-    .select("id")
-    .single();
+  const { data: planId, error } = await supabase.rpc("create_plan_with_join", {
+    target_catalog_bar_id: input.catalogBarId,
+    starter_user_id: input.userId,
+    target_location_name: input.locationName,
+    target_location_detail: input.locationDetail,
+    target_starts_at: input.startsAt.toISOString(),
+    target_ends_at: input.endsAt.toISOString(),
+    target_cap: input.cap,
+    target_note: input.note,
+    target_visibility: input.visibility
+  });
 
-  if (error) throw error;
+  if (error) throw new Error(`Create plan RPC failed: ${error.message}`);
+  if (!planId) throw new Error("Create plan RPC failed: no plan id returned.");
 
-  await joinPlan(plan.id, input.userId);
-  await notifyInterestedUsers(plan.id);
-  return plan.id as string;
+  await notifyInterestedUsers(planId);
+  return planId as string;
 }
 
 async function notifyInterestedUsers(planId: string) {
@@ -156,28 +153,24 @@ export async function joinPlan(planId: string, userId: string) {
     .from("plan_attendees")
     .upsert({ plan_id: planId, user_id: userId, left_at: null }, { onConflict: "plan_id,user_id" });
 
-  if (error) throw error;
+  if (error) throw new Error(error.message);
 }
 
 export async function leavePlan(planId: string, userId: string) {
-  const { error } = await supabase
-    .from("plan_attendees")
-    .update({ left_at: new Date().toISOString() })
-    .eq("plan_id", planId)
-    .eq("user_id", userId)
-    .is("left_at", null);
+  const { data, error } = await supabase.rpc("leave_plan_and_maybe_end", {
+    target_plan_id: planId,
+    leaving_user_id: userId
+  });
 
   if (error) throw error;
+  return Boolean(data);
 }
 
 export async function cancelPlan(planId: string, userId: string) {
-  const { error } = await supabase
-    .from("plans")
-    .update({ status: "ended", updated_at: new Date().toISOString() })
-    .eq("id", planId)
-    .eq("started_by", userId)
-    .select("id")
-    .single();
+  const { error } = await supabase.rpc("cancel_plan_if_empty", {
+    target_plan_id: planId,
+    organizer_user_id: userId
+  });
 
-  if (error) throw error;
+  if (error) throw new Error(`Cancel plan failed: ${error.message}`);
 }

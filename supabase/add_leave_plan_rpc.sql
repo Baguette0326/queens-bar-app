@@ -1,5 +1,3 @@
-grant select, insert, update on public.plan_attendees to authenticated;
-
 create or replace function public.leave_plan_and_maybe_end(
   target_plan_id uuid,
   leaving_user_id uuid

@@ -169,6 +169,7 @@ alter table public.bar_completions enable row level security;
 alter table public.tier_thresholds enable row level security;
 
 grant select, insert, update, delete on public.bar_interests to authenticated;
+grant select, insert, update on public.plans to authenticated;
 grant select, update on public.plan_notifications to authenticated;
 grant select, insert on public.chat_messages to authenticated;
 grant select, insert, update on public.plan_attendees to authenticated;
@@ -284,7 +285,58 @@ using (auth.uid() = started_by)
 with check (
   auth.uid() = started_by
   and status = 'ended'::public.plan_status
+  and not exists (
+    select 1
+    from public.plan_attendees attendee
+    where attendee.plan_id = plans.id
+      and attendee.left_at is null
+      and attendee.user_id <> auth.uid()
+  )
 );
+
+create or replace function public.cancel_plan_if_empty(
+  target_plan_id uuid,
+  organizer_user_id uuid
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if auth.uid() is null or auth.uid() <> organizer_user_id then
+    raise exception 'You must be signed in as the organizer.';
+  end if;
+
+  if not exists (
+    select 1
+    from public.plans
+    where id = target_plan_id
+      and started_by = organizer_user_id
+      and status <> 'ended'::public.plan_status
+  ) then
+    raise exception 'Plan not found or you are not the organizer.';
+  end if;
+
+  if exists (
+    select 1
+    from public.plan_attendees attendee
+    where attendee.plan_id = target_plan_id
+      and attendee.left_at is null
+      and attendee.user_id <> organizer_user_id
+  ) then
+    raise exception 'You can only cancel before anyone else joins.';
+  end if;
+
+  update public.plans
+  set status = 'ended'::public.plan_status,
+      updated_at = now()
+  where id = target_plan_id
+    and started_by = organizer_user_id;
+end;
+$$;
+
+grant execute on function public.cancel_plan_if_empty(uuid, uuid) to authenticated;
 
 create policy "attendees are readable"
 on public.plan_attendees for select
@@ -298,6 +350,117 @@ create policy "users can leave as themselves"
 on public.plan_attendees for update
 using (auth.uid() = user_id)
 with check (auth.uid() = user_id);
+
+create or replace function public.leave_plan_and_maybe_end(
+  target_plan_id uuid,
+  leaving_user_id uuid
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  active_attendee_count integer;
+begin
+  if auth.uid() is null or auth.uid() <> leaving_user_id then
+    raise exception 'You must be signed in as the leaving attendee.';
+  end if;
+
+  update public.plan_attendees
+  set left_at = now()
+  where plan_id = target_plan_id
+    and user_id = leaving_user_id
+    and left_at is null;
+
+  select count(*) into active_attendee_count
+  from public.plan_attendees
+  where plan_id = target_plan_id
+    and left_at is null;
+
+  if active_attendee_count = 0 then
+    update public.plans
+    set status = 'ended'::public.plan_status,
+        updated_at = now()
+    where id = target_plan_id;
+
+    return true;
+  end if;
+
+  return false;
+end;
+$$;
+
+grant execute on function public.leave_plan_and_maybe_end(uuid, uuid) to authenticated;
+
+drop function if exists public.create_plan_with_join(text, uuid, text, text, timestamptz, timestamptz, integer, text, text);
+
+create or replace function public.create_plan_with_join(
+  target_catalog_bar_id text,
+  starter_user_id uuid,
+  target_location_name text,
+  target_location_detail text,
+  target_starts_at timestamptz,
+  target_ends_at timestamptz,
+  target_cap integer,
+  target_note text,
+  target_visibility text
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  new_plan_id uuid;
+begin
+  if auth.uid() is null or auth.uid() <> starter_user_id then
+    raise exception 'You must be signed in as the plan creator.';
+  end if;
+
+  if target_visibility not in ('public', 'friends') then
+    raise exception 'Invalid plan visibility.';
+  end if;
+
+  insert into public.plans (
+    catalog_bar_id,
+    started_by,
+    location_name,
+    location_detail,
+    starts_at,
+    ends_at,
+    cap,
+    note,
+    visibility,
+    status
+  )
+  values (
+    target_catalog_bar_id,
+    starter_user_id,
+    target_location_name,
+    nullif(target_location_detail, ''),
+    target_starts_at,
+    target_ends_at,
+    target_cap,
+    nullif(target_note, ''),
+    target_visibility,
+    case
+      when target_starts_at <= now() then 'ongoing'::public.plan_status
+      else 'upcoming'::public.plan_status
+    end
+  )
+  returning id into new_plan_id;
+
+  insert into public.plan_attendees (plan_id, user_id, left_at)
+  values (new_plan_id, starter_user_id, null)
+  on conflict (plan_id, user_id)
+  do update set left_at = null;
+
+  return new_plan_id;
+end;
+$$;
+
+grant execute on function public.create_plan_with_join(text, uuid, text, text, timestamptz, timestamptz, integer, text, text) to authenticated;
 
 create policy "users can read own bar interests"
 on public.bar_interests for select
