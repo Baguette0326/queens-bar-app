@@ -13,33 +13,15 @@ import {
   Platform
 } from "react-native";
 import {
-  Award,
-  Bell,
   Bookmark,
-  BookOpen,
-  CalendarDays,
   Check,
-  ChevronDown,
   ChevronLeft,
   Crown,
-  Filter,
-  Gem,
-  GraduationCap,
-  Landmark,
-  Map,
-  MapPin,
   MessageCircle,
-  Plus,
-  Search,
-  Send,
-  Shield,
-  Star,
-  UserRound,
   Users,
-  Wrench
 } from "lucide-react-native";
 import type { Session } from "@supabase/supabase-js";
-import { AvatarId, BrowseCategory, Challenge, ChallengeCollection, ChallengeTone, challengeCollections, challenges, getBrowseCategories } from "./src/data/catalog";
+import { AvatarId, BrowseCategory, Challenge, ChallengeCollection, ChallengeTone, challenges, getBrowseCategories } from "./src/data/catalog";
 import { fetchCatalogBars } from "./src/data/catalogRepository";
 import { fetchChatMessages, RemoteChatMessage, sendChatMessage } from "./src/data/chatRepository";
 import { fetchCompletedBarIds, removeCompletedBar, selfCompleteBar } from "./src/data/completionRepository";
@@ -52,90 +34,30 @@ import { cancelPlan as cancelRemotePlan, createPlan as createRemotePlan, fetchPl
 import { createProfile, fetchProfile, getRankFromXp, Profile, roleDbToLabel, updateProfileDetails, updateProfileXp } from "./src/data/profileRepository";
 import { describeSupabaseError } from "./src/data/supabaseError";
 import { supabase } from "./src/lib/supabase";
-
-type Screen = "login" | "onboarding" | "discover" | "catalog" | "challenge" | "create" | "plan" | "chats" | "chat" | "dmThread" | "profile" | "notifications" | "completed" | "people" | "publicProfile" | "leaderboard";
-type CreatePlanDay = "Today" | "Tomorrow";
-
-const LAST_SCREEN_STORAGE_KEY = "ritual:lastScreen";
-const RESTORABLE_SCREENS = new Set<Screen>(["discover", "catalog", "chats", "profile", "notifications", "completed", "people", "leaderboard"]);
-const USERNAME_COOLDOWN_DAYS = 30;
-
-function readStoredScreen(): Screen | null {
-  if (Platform.OS !== "web") return null;
-
-  try {
-    const stored = window.sessionStorage.getItem(LAST_SCREEN_STORAGE_KEY) as Screen | null;
-    return stored && RESTORABLE_SCREENS.has(stored) ? stored : null;
-  } catch {
-    return null;
-  }
-}
-
-function writeStoredScreen(screen: Screen) {
-  if (Platform.OS !== "web" || !RESTORABLE_SCREENS.has(screen)) return;
-
-  try {
-    window.sessionStorage.setItem(LAST_SCREEN_STORAGE_KEY, screen);
-  } catch {
-    // Ignore storage failures; navigation still works without persistence.
-  }
-}
-
-function getUsernameCooldown(profile: Profile | null) {
-  if (!profile?.username_changed_at) return { canChange: true, daysLeft: 0 };
-
-  const lastChanged = new Date(profile.username_changed_at).getTime();
-  if (Number.isNaN(lastChanged)) return { canChange: true, daysLeft: 0 };
-
-  const nextChangeAt = lastChanged + USERNAME_COOLDOWN_DAYS * 24 * 60 * 60 * 1000;
-  const daysLeft = Math.ceil((nextChangeAt - Date.now()) / (24 * 60 * 60 * 1000));
-  return { canChange: daysLeft <= 0, daysLeft: Math.max(daysLeft, 0) };
-}
-
-function getPatchProgress(completedIds: string[]) {
-  const completed = new Set(completedIds);
-  return challengeCollections.map((collection) => {
-    const total = collection.barIds.length || collection.barCount;
-    const completedCount = collection.barIds.filter((id) => completed.has(id)).length;
-    return {
-      ...collection,
-      total,
-      completed: completedCount,
-      unlocked: total > 0 && completedCount >= total
-    };
-  });
-}
-
-type Plan = {
-  id: string;
-  challengeId: string;
-  place: string;
-  detail: string;
-  startsAt: string;
-  startsAtIso?: string;
-  status: "ongoing" | "upcoming";
-  visibility?: "public" | "friends";
-  attendees: string[];
-  attendeeProfiles?: Array<{ id: string; username: string }>;
-  cap?: number;
-  note: string;
-  startedBy: string;
-  startedById?: string;
-  currentUserJoined?: boolean;
-};
-
-const colors = {
-  paper: "#09111D",
-  paperLight: "#14243A",
-  ink: "#F5EBD6",
-  muted: "#C4B99F",
-  line: "#415979",
-  navy: "#12365E",
-  red: "#9F2428",
-  green: "#166238",
-  gold: "#E3A627",
-  cream: "#FFF6DF"
-};
+import { readStoredScreen, writeStoredScreen } from "./src/app/navigation";
+import { buildCreatePlanSchedule, formatCreatedPlanTime, formatCreateTime, parseCreateTime, sameMinute } from "./src/app/planSchedule";
+import { getPatchProgress, getRankProgress, getUsernameCooldown } from "./src/app/profileProgress";
+import type { CreatePlanDay, Plan, Screen } from "./src/app/types";
+import { AvatarIcon } from "./src/ui/AvatarIcon";
+import { BottomTabs } from "./src/ui/BottomTabs";
+import { dataStatusLabel } from "./src/ui/statusLabels";
+import { colors } from "./src/ui/theme";
+import { CatalogScreen } from "./src/screens/CatalogScreen";
+import { ChallengeDetailScreen } from "./src/screens/ChallengeDetailScreen";
+import { ChatsInboxScreen } from "./src/screens/ChatsInboxScreen";
+import { CompletedLogScreen } from "./src/screens/CompletedLogScreen";
+import { CreatePlanScreen } from "./src/screens/CreatePlanScreen";
+import { DirectMessageScreen } from "./src/screens/DirectMessageScreen";
+import { DiscoverScreen } from "./src/screens/DiscoverScreen";
+import { GroupChatScreen } from "./src/screens/GroupChatScreen";
+import { LeaderboardScreen } from "./src/screens/LeaderboardScreen";
+import { LoginScreen } from "./src/screens/LoginScreen";
+import { NotificationsScreen } from "./src/screens/NotificationsScreen";
+import { OnboardingScreen } from "./src/screens/OnboardingScreen";
+import { PeopleScreen } from "./src/screens/PeopleScreen";
+import { PlanDetailScreen } from "./src/screens/PlanDetailScreen";
+import { ProfileScreen } from "./src/screens/ProfileScreen";
+import { PublicProfileScreen } from "./src/screens/PublicProfileScreen";
 
 const avatarOptions: { id: AvatarId; label: string }[] = [
   { id: "crown", label: "Crown" },
@@ -1484,553 +1406,262 @@ export default function App() {
       <StatusBar barStyle="dark-content" />
       <View style={styles.phone}>
         {screen === "login" && (
-          <View style={styles.loginScreen}>
-            <BrandMark />
-            <Text style={styles.welcomePill}>WELCOME TO</Text>
-            <Text style={styles.heroTitle}>RITUAL</Text>
-            <Text style={styles.heroSubtitle}>Find the group. Do the bar. Build the jacket.</Text>
-            <FieldLabel text="EMAIL" />
-            <View style={styles.inputShell}>
-              <TextInput
-                value={email}
-                onChangeText={setEmail}
-                style={styles.input}
-                autoCapitalize="none"
-                keyboardType="email-address"
-                placeholder="you@example.com"
-                placeholderTextColor={colors.muted}
-              />
-            </View>
-            <PatchButton
-              label={authStatus === "sending" ? "SENDING..." : "SEND LOGIN LINK"}
-              tone="navy"
-              onPress={sendLoginLink}
-            />
-            {!!authMessage && <Text style={styles.authMessage}>{authMessage}</Text>}
-            {authStatus === "checking" && <Text style={styles.authMessage}>Checking login...</Text>}
-          </View>
+          <LoginScreen
+            email={email}
+            authStatus={authStatus}
+            authMessage={authMessage}
+            onEmailChange={setEmail}
+            onSendLink={sendLoginLink}
+            renderButton={(label, tone, onPress) => <PatchButton label={label} tone={tone} onPress={onPress} />}
+          />
         )}
 
         {screen === "onboarding" && (
-          <ScrollView contentContainerStyle={styles.onboarding}>
-            <BrandMark />
-            <Text style={styles.welcomePill}>WELCOME TO</Text>
-            <Text style={styles.heroTitle}>RITUAL</Text>
-            <Text style={styles.heroSubtitle}>Let's build your jacket.</Text>
-            <FieldLabel text="USERNAME" />
-            <View style={styles.inputShell}>
-              <TextInput value={username} onChangeText={setUsername} style={styles.input} autoCapitalize="none" />
-              <Check color={colors.green} size={18} />
-            </View>
-            <FieldLabel text="ROLE" />
-            <View style={styles.segmentRow}>
-              {["Frosh", "Frec", "Upper Year", "Other"].map((item) => (
-                <Pressable key={item} onPress={() => setRole(item)} style={[styles.segment, role === item && styles.segmentActive]}>
-                  <Text style={[styles.segmentText, role === item && styles.segmentTextActive]}>{item}</Text>
-                </Pressable>
-              ))}
-            </View>
-            <FieldLabel text="PICK YOUR PATCH (AVATAR)" />
-            <View style={styles.avatarGrid}>
-              {avatarOptions.map((item) => (
-                <Pressable
-                  key={item.id}
-                  accessibilityLabel={item.label}
-                  onPress={() => setAvatar(item.id)}
-                  style={[styles.avatarOption, avatar === item.id && styles.avatarOptionActive]}
-                >
-                  <AvatarIcon avatar={item.id} size={30} color={avatar === item.id ? colors.gold : colors.ink} />
-                </Pressable>
-              ))}
-            </View>
-            <View style={styles.guidelineRow}>
-              <View style={styles.checkbox} />
-              <Text style={styles.guidelineText}>I agree to the Ritual Guidelines</Text>
-            </View>
-            <PatchButton
-              label={authStatus === "saving" ? "SAVING..." : "LET'S GO!"}
-              tone="navy"
-              onPress={saveOnboardingProfile}
-            />
-            <Text style={styles.handNote}>Build Good.{"\n"}Have Fun.</Text>
-          </ScrollView>
+          <OnboardingScreen
+            username={username}
+            role={role}
+            avatar={avatar}
+            avatarOptions={avatarOptions}
+            authStatus={authStatus}
+            onUsernameChange={setUsername}
+            onRoleChange={setRole}
+            onAvatarChange={setAvatar}
+            onSave={saveOnboardingProfile}
+            renderButton={(label, tone, onPress) => <PatchButton label={label} tone={tone} onPress={onPress} />}
+          />
         )}
 
         {screen === "discover" && (
-          <AppScreen title="DISCOVER" right={<DiscoverHeaderActions count={unreadNotificationCount} onNotifications={openNotifications} onPeople={() => go("people")} onLeaderboard={() => go("leaderboard")} />}>
-            <SearchBar value={query} onChange={setQuery} placeholder="Search bars, locations, people..." />
-            <FilterRow labels={["All", "Ongoing", "Upcoming", "Nearby", "Easy"]} />
-            <SectionHeader title="ONGOING PLANS" action={plansStatusLabel(plansStatus)} />
-            {plans.length === 0 && <Text style={styles.emptyState}>No plans yet. Create the first one from the Catalog.</Text>}
-            {plans.filter((plan) => plan.status === "ongoing").map((plan) => (
-              <PlanPatch key={plan.id} plan={plan} catalog={catalog} onPress={() => openPlan(plan.id)} />
-            ))}
-            <SectionHeader title="UPCOMING PLANS" action={plans.length ? "See all" : "Create one"} />
-            {plans.filter((plan) => plan.status === "upcoming").map((plan) => (
-              <PlanPatch key={plan.id} plan={plan} catalog={catalog} onPress={() => openPlan(plan.id)} />
-            ))}
-          </AppScreen>
+          <DiscoverScreen
+            query={query}
+            plans={plans}
+            catalog={catalog}
+            plansStatus={plansStatus}
+            unreadNotificationCount={unreadNotificationCount}
+            onQueryChange={setQuery}
+            onOpenPlan={openPlan}
+            onNotifications={openNotifications}
+            onPeople={() => go("people")}
+            onLeaderboard={() => go("leaderboard")}
+            renderPlan={(plan, planCatalog, onPress) => <PlanPatch plan={plan} catalog={planCatalog} onPress={onPress} />}
+          />
         )}
 
         {screen === "notifications" && (
           <DetailScreen back={() => go("discover")} title="NOTIFICATIONS">
-            {notificationsStatus === "loading" && <Text style={styles.emptyState}>Loading notifications...</Text>}
-            {notificationsStatus !== "loading" && notifications.length === 0 && (
-              <Text style={styles.emptyState}>No notifications yet. Pin bars to hear when someone hosts them.</Text>
-            )}
-            {notifications.map((notification) => (
-              <NotificationRow
-                key={notification.id}
-                notification={notification}
-                challenge={catalog.find((item) => item.id === notification.catalogBarId)}
-                onPress={() => openNotification(notification)}
-              />
-            ))}
+            <NotificationsScreen
+              notifications={notifications}
+              status={notificationsStatus}
+              catalog={catalog}
+              onOpen={openNotification}
+            />
           </DetailScreen>
         )}
 
         {screen === "people" && (
           <DetailScreen back={() => go("discover")} title="PEOPLE">
-            {incomingFriendRequests.length > 0 && (
-              <>
-                <SectionHeader title="FRIEND REQUESTS" action={`${incomingFriendRequests.length}`} />
-                {incomingFriendRequests.map((request) => request.requester && (
-                  <FriendRequestRow
-                    key={request.id}
-                    request={request}
-                    onProfile={() => request.requester && openPublicProfile(request.requester)}
-                    onAccept={() => respondToFriendRequest(request.id, "accept")}
-                    onDecline={() => respondToFriendRequest(request.id, "decline")}
-                    disabled={friendActionStatus === "saving"}
-                  />
-                ))}
-              </>
-            )}
-            {friends.length > 0 && (
-              <>
-                <SectionHeader title="FRIENDS" action={`${friends.length}`} />
-                {friends.map((item) => (
-                  <PeopleRow key={item.id} profile={item} onPress={() => openPublicProfile(item)} />
-                ))}
-              </>
-            )}
-            <SectionHeader title="FIND PEOPLE" action={peopleStatus === "loading" ? "Loading" : undefined} />
-            <SearchBar value={peopleQuery} onChange={setPeopleQuery} placeholder="Search display names..." />
-            {peopleStatus === "loading" && <Text style={styles.emptyState}>Searching profiles...</Text>}
-            {peopleStatus === "error" && <Text style={styles.emptyState}>Could not load profiles. Check Supabase policies and try again.</Text>}
-            {peopleStatus !== "loading" && peopleResults.length === 0 && (
-              <Text style={styles.emptyState}>{peopleQuery.trim() ? "No matching profiles yet." : "No other profiles found yet."}</Text>
-            )}
-            {peopleResults.map((item) => (
-              <PeopleRow key={item.id} profile={item} onPress={() => openPublicProfile(item)} />
-            ))}
+            <PeopleScreen
+              incomingRequests={incomingFriendRequests}
+              friends={friends}
+              query={peopleQuery}
+              results={peopleResults}
+              status={peopleStatus}
+              friendActionSaving={friendActionStatus === "saving"}
+              onQueryChange={setPeopleQuery}
+              onOpenProfile={openPublicProfile}
+              onAcceptRequest={(requestId) => respondToFriendRequest(requestId, "accept")}
+              onDeclineRequest={(requestId) => respondToFriendRequest(requestId, "decline")}
+              renderPerson={(person, onPress) => <PeopleRow profile={person} onPress={onPress} />}
+              renderRequest={(request, onProfile, onAccept, onDecline, disabled) => (
+                <FriendRequestRow request={request} onProfile={onProfile} onAccept={onAccept} onDecline={onDecline} disabled={disabled} />
+              )}
+            />
           </DetailScreen>
         )}
 
         {screen === "leaderboard" && (
           <DetailScreen back={() => go("discover")} title="LEADERBOARD">
-            {leaderboardStatus === "loading" && <Text style={styles.emptyState}>Loading leaderboard...</Text>}
-            {leaderboardStatus === "error" && <Text style={styles.emptyState}>Could not load the leaderboard yet.</Text>}
-            {leaderboard.map((item, index) => (
-              <LeaderboardRow key={item.id} profile={item} place={index + 1} onPress={() => openPublicProfile(item, "leaderboard")} />
-            ))}
+            <LeaderboardScreen
+              profiles={leaderboard}
+              status={leaderboardStatus}
+              onOpenProfile={(person) => openPublicProfile(person, "leaderboard")}
+              renderRow={(person, place, onPress) => <LeaderboardRow profile={person} place={place} onPress={onPress} />}
+            />
           </DetailScreen>
         )}
 
         {screen === "publicProfile" && selectedPublicProfile && (
           <DetailScreen back={() => go(publicProfileBackScreen)} title="PROFILE">
-            <View style={styles.profileTop}>
-              <View style={styles.profileAvatar}><AvatarIcon avatar={selectedPublicProfile.avatar} color={colors.gold} size={42} /></View>
-              <View style={styles.profileNameBlock}>
-                <Text style={styles.profileName}>{selectedPublicProfile.username}</Text>
-                <Text style={styles.profileMeta}>
-                  {[selectedPublicProfile.year_label, selectedPublicProfile.program].filter(Boolean).join(" ") || roleDbToLabel(selectedPublicProfile.role)}
-                </Text>
-                <Tag text={roleDbToLabel(selectedPublicProfile.role).toUpperCase()} />
-              </View>
-              <View style={styles.tierPatch}><Text style={styles.tierSmall}>TIER</Text><Text style={styles.tierTitle}>{getRankFromXp(selectedPublicProfile.xp)}</Text><Award color={colors.gold} size={28} /></View>
-            </View>
-            <View style={styles.profileStatGrid}>
-              <StatBlock value={getRankFromXp(selectedPublicProfile.xp)} label="Rank" />
-              <StatBlock value={publicCompletedChallenges.length.toString()} label="Completed" />
-              <StatBlock value={friendStatus === "friends" ? "Friend" : "Public"} label="Access" />
-            </View>
-            <FieldLabel text="BIO" />
-            <Text style={styles.profileBio}>{selectedPublicProfile.bio || "No bio yet."}</Text>
-            {session?.user.id !== selectedPublicProfile.id && (
-              <View style={styles.profileActions}>
-                {friendStatus === "incoming" && selectedIncomingFriendRequest && (
-                  <>
-                    <PatchButton label={friendActionStatus === "saving" ? "SAVING..." : "ACCEPT FRIEND"} tone="green" onPress={() => respondToFriendRequest(selectedIncomingFriendRequest.id, "accept")} />
-                    <OutlineButton label="DECLINE REQUEST" onPress={() => respondToFriendRequest(selectedIncomingFriendRequest.id, "decline")} />
-                  </>
-                )}
-                {friendStatus === "none" && <PatchButton label={friendActionStatus === "saving" ? "SENDING..." : "ADD FRIEND"} tone="green" onPress={requestFriendship} />}
-                {friendStatus === "outgoing" && <OutlineButton label={friendActionStatus === "saving" ? "CANCELING..." : "CANCEL REQUEST"} onPress={runCancelFriendRequest} />}
-                {friendStatus === "friends" && <OutlineButton label={friendActionStatus === "saving" ? "REMOVING..." : "UNFRIEND"} onPress={confirmUnfriend} />}
-                {friendStatus === "friends" ? (
-                  <PatchButton label="MESSAGE" tone="navy" onPress={() => startDm(selectedPublicProfile.id)} />
-                ) : (
-                  <Text style={styles.emptyState}>Add each other as friends to unlock DMs.</Text>
-                )}
-              </View>
-            )}
-            <SectionHeader title="COMPLETED BARS" action={`${publicCompletedChallenges.length}`} />
-            <SectionHeader title="PATCH COLLECTIONS" action={`${publicPatchProgress.filter((collection) => collection.unlocked).length}/${publicPatchProgress.length}`} />
-            {publicPatchProgress.map((collection) => (
-              <PatchCollectionRow key={collection.id} collection={collection} />
-            ))}
-            {publicCompletedChallenges.length === 0 && <Text style={styles.emptyState}>No completed bars shown yet.</Text>}
-            {publicCompletedChallenges.map((challenge) => (
-              <CompletedBarRow key={challenge.id} challenge={challenge} onPress={() => openChallenge(challenge.id)} />
-            ))}
+            <PublicProfileScreen
+              profile={selectedPublicProfile}
+              currentUserId={session?.user.id}
+              roleLabel={roleDbToLabel(selectedPublicProfile.role)}
+              rank={getRankFromXp(selectedPublicProfile.xp)}
+              friendStatus={friendStatus}
+              friendActionSaving={friendActionStatus === "saving"}
+              incomingRequestId={selectedIncomingFriendRequest?.id}
+              completedChallenges={publicCompletedChallenges}
+              patchProgress={publicPatchProgress}
+              onAccept={(requestId) => respondToFriendRequest(requestId, "accept")}
+              onDecline={(requestId) => respondToFriendRequest(requestId, "decline")}
+              onAddFriend={requestFriendship}
+              onCancelRequest={runCancelFriendRequest}
+              onUnfriend={confirmUnfriend}
+              onMessage={() => startDm(selectedPublicProfile.id)}
+              onOpenChallenge={openChallenge}
+              renderButton={(label, tone, onPress) => <PatchButton label={label} tone={tone} onPress={onPress} />}
+              renderOutlineButton={(label, onPress) => <OutlineButton label={label} onPress={onPress} />}
+              renderCollection={(collection) => <PatchCollectionRow collection={collection} />}
+              renderCompletedBar={(challenge, onPress) => <CompletedBarRow challenge={challenge} onPress={onPress} />}
+            />
           </DetailScreen>
         )}
 
         {screen === "catalog" && (
-          <AppScreen title="CATALOG" right={<Text style={styles.xpBadge}>XP {xp.toLocaleString()}</Text>}>
-            <SearchBar value={query} onChange={setQuery} placeholder="Search challenges..." />
-            <FieldLabel text="BROWSE BY TYPE" />
-            <ChoiceFilterRow
-              labels={[
-                "All",
-                "Social & Games",
-                "Campus & Places",
-                "Music & Movies",
-                "Long-form",
-                "Participation",
-                "Unreviewed"
-              ]}
-              value={browseCategory}
-              onChange={(value) => setBrowseCategory(value as BrowseCategory | "All")}
-            />
-            <FieldLabel text="DIFFICULTY" />
-            <ChoiceFilterRow
-              labels={["All", "Easy", "Medium", "Hard", "Legendary"]}
-              value={difficulty}
-              onChange={(value) => setDifficulty(value as Challenge["difficulty"] | "All")}
-            />
-            <FieldLabel text="COMPLETION" />
-            <ChoiceFilterRow
-              labels={["All", "Completed", "Not completed"]}
-              value={completionFilter}
-              onChange={(value) => setCompletionFilter(value as "All" | "Completed" | "Not completed")}
-            />
-            <Text style={styles.catalogCount}>
-              Showing {visibleChallenges.length} of {filteredChallenges.length} bars Â· {catalogStatusLabel(catalogStatus)}
-            </Text>
-            {(browseCategory !== "All" || difficulty !== "All" || completionFilter !== "All" || query) && (
-              <Pressable
-                onPress={() => {
-                  setBrowseCategory("All");
-                  setDifficulty("All");
-                  setCompletionFilter("All");
-                  setQuery("");
-                }}
-                style={styles.clearFilters}
-              >
-                <Text style={styles.clearFiltersText}>Clear filters</Text>
-              </Pressable>
+          <CatalogScreen
+            xp={xp}
+            query={query}
+            browseCategory={browseCategory}
+            difficulty={difficulty}
+            completionFilter={completionFilter}
+            catalogStatus={catalogStatus}
+            visibleChallenges={visibleChallenges}
+            filteredCount={filteredChallenges.length}
+            pinnedBarIds={pinnedBarIds}
+            completedBarIds={completedBarIds}
+            onQueryChange={setQuery}
+            onBrowseCategoryChange={setBrowseCategory}
+            onDifficultyChange={setDifficulty}
+            onCompletionFilterChange={setCompletionFilter}
+            onOpenChallenge={openChallenge}
+            renderChallenge={(challenge, pinned, completed, onPress) => (
+              <ChallengePatch challenge={challenge} pinned={pinned} completed={completed} onPress={onPress} />
             )}
-            <View style={styles.catalogGrid}>
-              {visibleChallenges.map((challenge) => (
-                <ChallengePatch
-                  key={challenge.id}
-                  challenge={challenge}
-                  pinned={pinnedBarIds.includes(challenge.id)}
-                  completed={completedBarIds.includes(challenge.id)}
-                  onPress={() => openChallenge(challenge.id)}
-                />
-              ))}
-            </View>
-          </AppScreen>
+          />
         )}
 
         {screen === "challenge" && (
           <DetailScreen back={() => go("catalog")}>
-            <ChallengeHero challenge={selectedChallenge} />
-            <View style={styles.metaRow}>
-              {getBrowseCategories(selectedChallenge).filter((category) => category !== "Unreviewed").map((category) => <Tag key={category} text={category} active />)}
-              {selectedChallenge.tags.filter((tag) => tag !== "Shenanigans").map((tag) => <Tag key={tag} text={tag} />)}
-            </View>
-            <FieldLabel text="ABOUT THIS BAR" />
-            <Text style={styles.detailCopy}>{selectedChallenge.summary}</Text>
-            <FieldLabel text={selectedChallenge.reviewed ? "TRADITIONAL REQUIREMENT" : "INSTRUCTIONS"} />
-            <Text style={styles.detailCopy}>{selectedChallenge.instructions}</Text>
-            <FieldLabel text="COMMON LOCATIONS" />
-            <View style={styles.metaRow}>
-              {selectedChallenge.places.map((place) => <Tag key={place} text={place} />)}
-            </View>
-            <View style={styles.statRow}>
-              <StatBlock value={(selectedChallenge.interested + (selectedChallengePinned ? 1 : 0)).toLocaleString()} label="Interested" />
-              <StatBlock value={`${selectedChallenge.upcoming}`} label="Upcoming Plans" />
-            </View>
-            <PatchButton
-              label={interestStatus === "saving" ? "SAVING..." : selectedChallengePinned ? "PINNED - NOTIFY ME" : "PIN THIS BAR"}
-              tone={selectedChallengePinned ? "green" : "navy"}
-              onPress={interestStatus === "saving" ? () => undefined : toggleInterest}
+            <ChallengeDetailScreen
+              challenge={selectedChallenge}
+              catalog={catalog}
+              plans={plans}
+              pinned={selectedChallengePinned}
+              completed={selectedChallengeCompleted}
+              interestSaving={interestStatus === "saving"}
+              completionSaving={completionStatus === "saving"}
+              onToggleInterest={toggleInterest}
+              onToggleCompletion={completeSelectedChallenge}
+              onMoreInfo={() => Linking.openURL(selectedChallenge.sourceUrl)}
+              onOpenPlan={openPlan}
+              onCreatePlan={() => go("create")}
+              renderHero={(challenge) => <ChallengeHero challenge={challenge} />}
+              renderTag={(text, active) => <Tag text={text} active={active} />}
+              renderStat={(value, label) => <StatBlock value={value} label={label} />}
+              renderButton={(label, tone, onPress) => <PatchButton label={label} tone={tone} onPress={onPress} />}
+              renderOutlineButton={(label, onPress) => <OutlineButton label={label} onPress={onPress} />}
+              renderSectionHeader={(title, action) => <SectionHeader title={title} action={action} />}
+              renderPlan={(plan, planCatalog, onPress) => <PlanPatch plan={plan} catalog={planCatalog} onPress={onPress} />}
             />
-            <PatchButton
-              label={completionStatus === "saving" ? "SAVING..." : selectedChallengeCompleted ? "UNDO COMPLETION" : `MARK COMPLETED (+${selectedChallenge.xp} XP)`}
-              tone={selectedChallengeCompleted ? "green" : "red"}
-              onPress={completeSelectedChallenge}
-            />
-            <OutlineButton label="MORE INFO" onPress={() => Linking.openURL(selectedChallenge.sourceUrl)} />
-            <SectionHeader title="ONGOING PLANS" action="See all" />
-            {plans.filter((plan) => plan.challengeId === selectedChallenge.id && plan.status === "ongoing").map((plan) => (
-              <PlanPatch key={plan.id} plan={plan} catalog={catalog} onPress={() => openPlan(plan.id)} />
-            ))}
-            <PatchButton label="CREATE A PLAN" tone="red" onPress={() => go("create")} />
           </DetailScreen>
         )}
 
         {screen === "create" && (
           <DetailScreen back={() => go("challenge")} title="CREATE PLAN">
-            <ProgressSteps />
-            <FieldLabel text="CHOOSE A CHALLENGE" />
-            <ChallengePicker
+            <CreatePlanScreen
               catalog={catalog}
               selectedChallenge={selectedChallenge}
-              open={challengePickerOpen}
-              onToggle={() => setChallengePickerOpen((current) => !current)}
-              onSelect={(challengeId) => {
+              pickerOpen={challengePickerOpen}
+              matchingPlans={matchingLivePlans}
+              day={planDay}
+              time={planTime}
+              durationMinutes={planDurationMinutes}
+              place={planPlace}
+              detail={planDetail}
+              visibility={planVisibility}
+              cap={planCap}
+              note={planNote}
+              createMessage={planCreateMessage}
+              publishing={publishingPlan}
+              onTogglePicker={() => setChallengePickerOpen((current) => !current)}
+              onSelectChallenge={(challengeId) => {
                 setSelectedChallengeId(challengeId);
                 setChallengePickerOpen(false);
               }}
+              onOpenPlan={openPlan}
+              onDayChange={setPlanDay}
+              onTimeChange={setPlanTime}
+              onDurationChange={setPlanDurationMinutes}
+              onPlaceChange={setPlanPlace}
+              onDetailChange={setPlanDetail}
+              onVisibilityChange={setPlanVisibility}
+              onCapChange={setPlanCap}
+              onNoteChange={setPlanNote}
+              onPublish={createPlan}
+              renderProgress={() => <ProgressSteps />}
+              renderButton={(label, tone, onPress) => <PatchButton label={label} tone={tone} onPress={onPress} />}
             />
-            {matchingLivePlans.length > 0 && (
-              <View style={styles.existingPlanNotice}>
-                <Text style={styles.existingPlanTitle}>Already on the board</Text>
-                <Text style={styles.existingPlanText}>
-                  {matchingLivePlans.length === 1
-                    ? "There is already a live or upcoming plan for this bar. You can still publish your own separate plan."
-                    : `There are already ${matchingLivePlans.length} live or upcoming plans for this bar. You can still publish your own separate plan.`}
-                </Text>
-                {matchingLivePlans.slice(0, 2).map((plan) => (
-                  <Pressable key={plan.id} onPress={() => openPlan(plan.id)} style={styles.existingPlanRow}>
-                    <Text style={styles.existingPlanRowTitle}>{plan.place}</Text>
-                    <Text style={styles.existingPlanRowMeta}>{plan.startsAt} Â· {plan.attendees.length}/{plan.cap ?? "âˆž"}</Text>
-                  </Pressable>
-                ))}
-              </View>
-            )}
-            <FieldLabel text="WHEN & DURATION" />
-            <ChoiceFilterRow labels={["Today", "Tomorrow"]} value={planDay} onChange={(value) => setPlanDay(value as CreatePlanDay)} />
-            <View style={styles.formRow}>
-              <View style={[styles.inputShell, styles.formInputShell]}>
-                <TextInput
-                  value={planTime}
-                  onChangeText={setPlanTime}
-                  style={styles.input}
-                  placeholder="7:00 PM"
-                  placeholderTextColor={colors.muted}
-                  autoCapitalize="characters"
-                />
-              </View>
-              <View style={styles.durationSummary}>
-                <Text style={styles.durationSummaryLabel}>DURATION</Text>
-                <Text style={styles.durationSummaryValue}>{planDurationMinutes} min</Text>
-              </View>
-            </View>
-            <FieldLabel text="DURATION" />
-            <ChoiceFilterRow
-              labels={["30 min", "60 min", "120 min", "180 min"]}
-              value={`${planDurationMinutes} min`}
-              onChange={(value) => setPlanDurationMinutes(Number.parseInt(value, 10))}
-            />
-            <FieldLabel text="WHERE" />
-            <View style={styles.metaRow}>
-              {[...selectedChallenge.places, "Other location"].map((place) => (
-                <Pressable key={place} onPress={() => setPlanPlace(place)}>
-                  <Tag text={place} active={planPlace === place} />
-                </Pressable>
-              ))}
-            </View>
-            <View style={styles.inputShell}>
-              <TextInput
-                value={planDetail}
-                onChangeText={setPlanDetail}
-                style={styles.input}
-                placeholder="Specific spot, room, lobby, entrance..."
-                placeholderTextColor={colors.muted}
-              />
-            </View>
-            <FieldLabel text="WHO CAN SEE IT" />
-            <ChoiceFilterRow
-              labels={["Public", "Friends"]}
-              value={planVisibility === "public" ? "Public" : "Friends"}
-              onChange={(value) => setPlanVisibility(value === "Friends" ? "friends" : "public")}
-            />
-            <FieldLabel text="CAP (OPTIONAL)" />
-            <View style={styles.stepper}>
-              <Pressable onPress={() => setPlanCap((current) => Math.max(1, current - 1))}>
-                <Text style={styles.stepperText}>-</Text>
-              </Pressable>
-              <Text style={styles.stepperText}>{planCap}</Text>
-              <Pressable onPress={() => setPlanCap((current) => Math.min(99, current + 1))}>
-                <Text style={styles.stepperText}>+</Text>
-              </Pressable>
-            </View>
-            <FieldLabel text="NOTE (OPTIONAL)" />
-            <View style={styles.noteBox}>
-              <TextInput
-                value={planNote}
-                onChangeText={(text) => setPlanNote(text.slice(0, 100))}
-                style={styles.noteInput}
-                multiline
-                placeholder="Add anything people should know..."
-                placeholderTextColor={colors.muted}
-              />
-              <Text style={styles.counter}>{planNote.length}/100</Text>
-            </View>
-            {!!planCreateMessage && <Text style={styles.formNotice}>{planCreateMessage}</Text>}
-            <PatchButton label={publishingPlan ? "PUBLISHING..." : "PUBLISH PLAN!"} tone="red" onPress={publishingPlan ? () => undefined : createPlan} />
           </DetailScreen>
         )}
 
-        {screen === "plan" && (
+        {screen === "plan" && selectedPlan && (
           <DetailScreen back={() => go("discover")}>
-            <ChallengeHero challenge={selectedChallenge} compact />
-            <PlanInfoRow icon={<CalendarDays color={colors.ink} size={18} />} label="TIME" value={selectedPlan.startsAt} />
-            <PlanInfoRow icon={<MapPin color={colors.ink} size={18} />} label="LOCATION" value={`${selectedPlan.place}\n${selectedPlan.detail}`} />
-            <PlanInfoRow icon={<Users color={colors.ink} size={18} />} label="VISIBILITY" value={selectedPlan.visibility === "friends" ? "Friends only" : "Public"} />
-            <PlanInfoRow icon={<Users color={colors.ink} size={18} />} label="ATTENDEES" value={`${selectedPlan.attendees.length} / ${selectedPlan.cap ?? "âˆž"}`} />
-            <Pressable
-              onPress={() => selectedPlan.startedById && openPublicProfileById(selectedPlan.startedById, "plan")}
-              disabled={!selectedPlan.startedById}
-            >
-              <PlanInfoRow icon={<AvatarIcon avatar="gear" color={colors.ink} size={18} />} label="STARTED BY" value={selectedPlan.startedBy} />
-            </Pressable>
-            <PlanInfoRow icon={<BookOpen color={colors.ink} size={18} />} label="NOTE" value={selectedPlan.note} />
-            {(selectedPlan.currentUserJoined || selectedPlan.attendees.includes(username)) && (
-              <>
-                <SectionHeader title="INVITE FRIENDS" action={inviteableFriends.length ? `${inviteableFriends.length}` : undefined} />
-                {friends.length === 0 && <Text style={styles.emptyState}>Add friends to invite them to plans.</Text>}
-                {friends.length > 0 && inviteableFriends.length === 0 && <Text style={styles.emptyState}>All of your friends are already in this plan.</Text>}
-                {inviteableFriends.map((friend) => (
-                  <FriendInviteRow
-                    key={friend.id}
-                    friend={friend}
-                    disabled={!!invitingFriendId}
-                    inviting={invitingFriendId === friend.id}
-                    onInvite={() => inviteFriendToPlan(friend)}
-                  />
-                ))}
-              </>
-            )}
-            <PatchButton
-              label={selectedPlan.currentUserJoined || selectedPlan.attendees.includes(username) ? "OPEN GROUP CHAT" : "I'M IN!"}
-              tone="green"
-              onPress={selectedPlan.currentUserJoined || selectedPlan.attendees.includes(username) ? () => openChat(selectedPlan.id) : confirmJoinPlan}
+            <PlanDetailScreen
+              plan={selectedPlan}
+              challenge={selectedChallenge}
+              username={username}
+              friends={friends}
+              inviteableFriends={inviteableFriends}
+              invitingFriendId={invitingFriendId}
+              currentUserStartedPlan={currentUserStartedPlan}
+              canCurrentUserCancelPlan={canCurrentUserCancelPlan}
+              onOpenOrganizer={() => selectedPlan.startedById && openPublicProfileById(selectedPlan.startedById, "plan")}
+              onInviteFriend={inviteFriendToPlan}
+              onOpenChat={() => openChat(selectedPlan.id)}
+              onJoin={confirmJoinPlan}
+              onLeave={confirmLeavePlan}
+              onCancel={cancelPlan}
+              renderHero={(challenge) => <ChallengeHero challenge={challenge} compact />}
+              renderFriend={(friend, inviting, disabled, onInvite) => (
+                <FriendInviteRow friend={friend} inviting={inviting} disabled={disabled} onInvite={onInvite} />
+              )}
+              renderButton={(label, tone, onPress) => <PatchButton label={label} tone={tone} onPress={onPress} />}
+              renderOutlineButton={(label, onPress) => <OutlineButton label={label} onPress={onPress} />}
             />
-            {(selectedPlan.currentUserJoined || selectedPlan.attendees.includes(username)) && !currentUserStartedPlan && <OutlineButton label="LEAVE GROUP" onPress={confirmLeavePlan} />}
-            {canCurrentUserCancelPlan && <OutlineButton label="CANCEL PLAN" onPress={cancelPlan} />}
-            {currentUserStartedPlan && !canCurrentUserCancelPlan && (
-              <Text style={styles.emptyState}>You can only cancel before anyone else joins.</Text>
-            )}
           </DetailScreen>
         )}
 
         {screen === "chats" && (
-          <AppScreen title="CHATS" right={<Text style={styles.xpBadge}>{joinedPlans.length + dmThreads.length}</Text>}>
-            <SectionHeader title="YOUR GROUP CHATS" action={plansStatusLabel(plansStatus)} />
-            {joinedPlans.length === 0 && <Text style={styles.emptyState}>Join a plan to start seeing its group chat here.</Text>}
-            {joinedPlans.map((plan) => (
-              <PlanPatch key={plan.id} plan={plan} catalog={catalog} onPress={() => openChat(plan.id)} />
-            ))}
-            <SectionHeader title="DIRECT MESSAGES" action={dmThreads.length ? `${dmThreads.length}` : undefined} />
-            {dmThreads.length === 0 && <Text style={styles.emptyState}>Open someone's profile and tap MESSAGE to start a DM.</Text>}
-            {dmThreads.map((thread) => (
-              <DmThreadRow key={thread.id} thread={thread} onPress={() => openDmThread(thread.id)} />
-            ))}
-          </AppScreen>
+          <ChatsInboxScreen
+            joinedPlans={joinedPlans}
+            dmThreads={dmThreads}
+            catalog={catalog}
+            plansStatus={plansStatus}
+            onOpenChat={openChat}
+            onOpenDm={openDmThread}
+            renderPlan={(plan, planCatalog, onPress) => <PlanPatch plan={plan} catalog={planCatalog} onPress={onPress} />}
+            renderDmThread={(thread, onPress) => <DmThreadRow thread={thread} onPress={onPress} />}
+          />
         )}
 
         {screen === "chat" && selectedPlan && (
-          <View style={styles.chatScreen}>
-            <View style={styles.chatHeader}>
-              <View style={styles.chatHeaderTop}>
-                <Pressable accessibilityLabel="Back to chats" onPress={() => go("chats")} style={({ pressed }) => [styles.chatMembersButton, pressedScale(pressed)]}>
-                  <ChevronLeft color={colors.ink} size={23} />
-                </Pressable>
-                <View style={styles.chatHeaderTitleBlock}>
-                  <Text style={styles.chatTitle}>{selectedChallenge.name.toUpperCase()}</Text>
-                  <Text style={styles.chatStatus}>â— Plan Chat Â· {selectedPlan.attendees.length} Going</Text>
-                </View>
-                <Pressable
-                  accessibilityLabel="Show chat members"
-                  onPress={() => setChatMembersOpen((current) => !current)}
-                  style={({ pressed }) => [styles.chatMembersButton, pressedScale(pressed)]}
-                >
-                  <Users color={colors.ink} size={19} />
-                </Pressable>
-              </View>
-              <Pressable
-                accessibilityLabel="Leave group chat"
-                onPress={confirmLeavePlan}
-                style={({ pressed }) => [styles.chatLeaveButton, pressedScale(pressed)]}
-              >
-                <Text style={styles.chatLeaveButtonText}>LEAVE GROUP</Text>
-              </Pressable>
-            </View>
-            {chatMembersOpen && (
-              <View style={styles.chatMembersOverlay}>
-                <Pressable style={styles.chatMembersBackdrop} onPress={() => setChatMembersOpen(false)} />
-                <View style={styles.chatMembersDrawer}>
-                  <View style={styles.chatMembersDrawerHeader}>
-                    <Text style={styles.chatMembersTitle}>WHO'S IN</Text>
-                    <Pressable onPress={() => setChatMembersOpen(false)} style={({ pressed }) => [styles.chatMembersClose, pressedScale(pressed)]}>
-                      <Text style={styles.chatMembersCloseText}>X</Text>
-                    </Pressable>
-                  </View>
-                  <Text style={styles.chatMembersCount}>{selectedPlan.attendees.length} going</Text>
-                  {(selectedPlan.attendeeProfiles?.length ? selectedPlan.attendeeProfiles : selectedPlan.attendees.map((attendee) => ({ id: attendee, username: attendee }))).map((attendee) => (
-                    <Pressable
-                      key={attendee.id}
-                      onPress={() => {
-                        if (selectedPlan.attendeeProfiles?.length) {
-                          setChatMembersOpen(false);
-                          openPublicProfileById(attendee.id, "chat");
-                        }
-                      }}
-                      style={({ pressed }) => [styles.chatMemberRow, pressedScale(pressed)]}
-                    >
-                      <View style={styles.chatMemberAvatar}><AvatarIcon avatar="star" color={colors.ink} size={15} /></View>
-                      <Text style={styles.chatMemberRowText}>{attendee.username}</Text>
-                    </Pressable>
-                  ))}
-                </View>
-              </View>
-            )}
-            <ScrollView contentContainerStyle={styles.chatList}>
-              {chatStatus === "loading" && <Text style={styles.emptyState}>Loading chat...</Text>}
-              {chatStatus !== "loading" && messages.length === 0 && (
-                <Text style={styles.emptyState}>No messages yet. Start the plan chat.</Text>
-              )}
-              {messages.map((item) => (
-                item.body.endsWith(" joined the plan.") ? (
-                  <View key={item.id} style={styles.systemMessage}>
-                    <Text style={styles.systemMessageText}>{item.body}</Text>
-                  </View>
-                ) : (
-                  <View key={item.id} style={[styles.messageRow, item.senderId === session?.user.id && styles.messageRowMine]}>
-                    <View style={styles.miniAvatar}><AvatarIcon avatar={item.senderId === session?.user.id ? avatar : "star"} color={colors.ink} size={16} /></View>
-                    <View style={[styles.messageBubble, item.senderId === session?.user.id && styles.messageBubbleMine]}>
-                      <Pressable onPress={() => openPublicProfileById(item.senderId, "chat")}>
-                        <Text style={styles.messageFrom}>{item.from}</Text>
-                      </Pressable>
-                      <Text style={styles.messageText}>{item.body}</Text>
-                    </View>
-                  </View>
-                )
-              ))}
-            </ScrollView>
-            <View style={styles.composer}>
-              <Plus color={colors.ink} size={20} />
-              <TextInput value={message} onChangeText={setMessage} placeholder={`Message ${selectedChallenge.name}...`} style={styles.composerInput} />
-              <Pressable onPress={sendMessage} style={[styles.sendButton, chatStatus === "sending" && styles.sendButtonDisabled]}><Send color={colors.ink} size={18} /></Pressable>
-            </View>
-          </View>
+          <GroupChatScreen
+            plan={selectedPlan}
+            challenge={selectedChallenge}
+            messages={messages}
+            message={message}
+            status={chatStatus}
+            membersOpen={chatMembersOpen}
+            currentUserId={session?.user.id}
+            currentUserAvatar={avatar}
+            onBack={() => go("chats")}
+            onLeave={confirmLeavePlan}
+            onToggleMembers={() => setChatMembersOpen((current) => !current)}
+            onCloseMembers={() => setChatMembersOpen(false)}
+            onOpenProfile={(userId) => openPublicProfileById(userId, "chat")}
+            onMessageChange={setMessage}
+            onSend={sendMessage}
+          />
         )}
 
         {screen === "chat" && !selectedPlan && (
@@ -2041,125 +1672,66 @@ export default function App() {
         )}
 
         {screen === "dmThread" && (
-          <View style={styles.chatScreen}>
-            <View style={styles.chatHeader}>
-              <View style={styles.chatHeaderTop}>
-                <Pressable accessibilityLabel="Back to chats" onPress={() => go("chats")} style={({ pressed }) => [styles.chatMembersButton, pressedScale(pressed)]}>
-                  <ChevronLeft color={colors.ink} size={23} />
-                </Pressable>
-                <Pressable
-                  onPress={() => selectedDmThread?.otherUserId && openPublicProfileById(selectedDmThread.otherUserId, "dmThread")}
-                  style={styles.chatHeaderTitleBlock}
-                >
-                  <Text style={styles.chatTitle}>{selectedDmThread?.otherUsername.toUpperCase() ?? "DM"}</Text>
-                  <Text style={styles.chatStatus}>Direct Message</Text>
-                </Pressable>
-                <View style={styles.chatMembersButton} />
-              </View>
-            </View>
-            <ScrollView contentContainerStyle={styles.chatList}>
-              {dmStatus === "loading" && <Text style={styles.emptyState}>Loading messages...</Text>}
-              {dmStatus !== "loading" && dmMessages.length === 0 && (
-                <Text style={styles.emptyState}>No messages yet. Say hi.</Text>
-              )}
-              {dmMessages.map((item) => (
-                <View key={item.id} style={[styles.messageRow, item.senderId === session?.user.id && styles.messageRowMine]}>
-                  <View style={styles.miniAvatar}><AvatarIcon avatar={item.senderId === session?.user.id ? avatar : selectedDmThread?.otherAvatar ?? "star"} color={colors.ink} size={16} /></View>
-                  <View style={[styles.messageBubble, item.senderId === session?.user.id && styles.messageBubbleMine]}>
-                    <Text style={styles.messageFrom}>{item.from}</Text>
-                    <Text style={styles.messageText}>{item.body}</Text>
-                  </View>
-                </View>
-              ))}
-            </ScrollView>
-            <View style={styles.composer}>
-              <Plus color={colors.ink} size={20} />
-              <TextInput value={dmMessage} onChangeText={setDmMessage} placeholder={`Message ${selectedDmThread?.otherUsername ?? "user"}...`} style={styles.composerInput} />
-              <Pressable onPress={sendDirectMessage} style={[styles.sendButton, dmStatus === "sending" && styles.sendButtonDisabled]}><Send color={colors.ink} size={18} /></Pressable>
-            </View>
-          </View>
+          <DirectMessageScreen
+            thread={selectedDmThread}
+            messages={dmMessages}
+            message={dmMessage}
+            status={dmStatus}
+            currentUserId={session?.user.id}
+            currentUserAvatar={avatar}
+            onBack={() => go("chats")}
+            onOpenProfile={() => selectedDmThread?.otherUserId && openPublicProfileById(selectedDmThread.otherUserId, "dmThread")}
+            onMessageChange={setDmMessage}
+            onSend={sendDirectMessage}
+          />
         )}
 
         {screen === "profile" && (
-          <AppScreen title="" right={<Shield color={colors.ink} size={20} />}>
-            <View style={styles.profileTop}>
-              <View style={styles.profileAvatar}><AvatarIcon avatar={avatar} color={colors.gold} size={42} /></View>
-              <View style={styles.profileNameBlock}>
-                <Text style={styles.profileName}>{username}</Text>
-                <Text style={styles.profileMeta}>{profile ? roleDbToLabel(profile.role) : role}</Text>
-                <Tag text={(profile ? roleDbToLabel(profile.role) : role).toUpperCase()} />
-              </View>
-              <View style={styles.tierPatch}><Text style={styles.tierSmall}>TIER</Text><Text style={styles.tierTitle}>{tier}</Text><Award color={colors.gold} size={28} /></View>
-            </View>
-            <FieldLabel text="DISPLAY NAME" />
-            <TextInput
-              value={draftUsername}
-              onChangeText={(text) => setDraftUsername(text.slice(0, 24))}
-              style={[styles.singleLineInput, !usernameCooldown.canChange && styles.inputDisabled]}
-              editable={usernameCooldown.canChange}
-              placeholder="Display name"
-              placeholderTextColor={colors.muted}
-            />
-            <Text style={styles.inputHint}>
-              {usernameCooldown.canChange
-                ? usernameChanged
-                  ? "Saving will lock your display name for 30 days."
-                  : "You can change your display name once every 30 days."
-                : `Display name locked for ${usernameCooldown.daysLeft} more day${usernameCooldown.daysLeft === 1 ? "" : "s"}.`}
-            </Text>
-            <FieldLabel text="PROFILE PATCH" />
-            <View style={styles.avatarGrid}>
-              {avatarOptions.map((item) => (
-                <Pressable
-                  key={item.id}
-                  accessibilityLabel={item.label}
-                  onPress={() => setAvatar(item.id)}
-                  style={[styles.avatarOption, avatar === item.id && styles.avatarOptionActive]}
-                >
-                  <AvatarIcon avatar={item.id} size={30} color={avatar === item.id ? colors.gold : colors.ink} />
-                </Pressable>
-              ))}
-            </View>
-            <FieldLabel text="BIO" />
-            <View style={styles.bioBox}>
-              <TextInput
-                value={draftBio}
-                onChangeText={(text) => setDraftBio(text.slice(0, 160))}
-                style={styles.bioInput}
-                multiline
-                placeholder="Add a short bio..."
-                placeholderTextColor={colors.muted}
-              />
-              <Text style={styles.counter}>{draftBio.length}/160</Text>
-            </View>
-            <OutlineButton label={profileSaveStatus === "saving" ? "SAVING..." : "SAVE PROFILE"} onPress={saveProfileDetails} />
-            <Text style={styles.progressText}>{xp.toLocaleString()} / {rankProgress.target.toLocaleString()} XP</Text>
-            <View style={styles.progressTrack}><View style={[styles.progressFill, { width: `${rankProgress.progress}%` }]} /></View>
-            <Text style={styles.progressHint}>
-              {rankProgress.remaining > 0 ? `${rankProgress.remaining.toLocaleString()} XP to ${rankProgress.next}` : "Max rank reached"}
-            </Text>
-            <SectionHeader title="PATCH COLLECTIONS" action={`${patchProgress.filter((collection) => collection.unlocked).length}/${patchProgress.length}`} />
-            {patchProgress.map((collection) => (
-              <PatchCollectionRow key={collection.id} collection={collection} />
-            ))}
-            <SectionHeader title="COMPLETED BARS" action="See all" onAction={() => go("completed")} />
-            <CollectionRow icon="gem" title="HONOR LOG" value={`${completedBarIds.length} / ${catalog.length}`} progress={Math.min(completedBarIds.length, 10)} total={10} />
-            <OutlineButton label="OPEN COMPLETED LOG" onPress={() => go("completed")} />
-            {completedChallenges.length === 0 && <Text style={styles.emptyState}>No completed bars yet. Open a bar and mark it completed when you earn it.</Text>}
-            {completedChallenges.slice(0, 8).map((challenge) => (
-              <CompletedBarRow key={challenge.id} challenge={challenge} onPress={() => openChallenge(challenge.id)} />
-            ))}
-            <OutlineButton label="SIGN OUT" onPress={() => supabase.auth.signOut()} />
-          </AppScreen>
+          <ProfileScreen
+            username={username}
+            roleLabel={profile ? roleDbToLabel(profile.role) : role}
+            avatar={avatar}
+            avatarOptions={avatarOptions}
+            tier={tier}
+            draftUsername={draftUsername}
+            draftBio={draftBio}
+            usernameCooldown={usernameCooldown}
+            usernameChanged={usernameChanged}
+            profileSaving={profileSaveStatus === "saving"}
+            xp={xp}
+            rankProgress={rankProgress}
+            patchProgress={patchProgress}
+            completedBarIds={completedBarIds}
+            catalogCount={catalog.length}
+            completedChallenges={completedChallenges}
+            onAvatarChange={setAvatar}
+            onUsernameChange={setDraftUsername}
+            onBioChange={setDraftBio}
+            onSave={saveProfileDetails}
+            onOpenCompleted={() => go("completed")}
+            onOpenChallenge={openChallenge}
+            onSignOut={() => supabase.auth.signOut()}
+            renderCollection={(collection) => <PatchCollectionRow collection={collection} />}
+            renderHonorLog={(completed, total) => (
+              <CollectionRow icon="gem" title="HONOR LOG" value={`${completed} / ${total}`} progress={Math.min(completed, 10)} total={10} />
+            )}
+            renderCompletedBar={(challenge, onPress) => <CompletedBarRow challenge={challenge} onPress={onPress} />}
+            renderOutlineButton={(label, onPress) => <OutlineButton label={label} onPress={onPress} />}
+          />
         )}
 
         {screen === "completed" && (
           <DetailScreen back={() => go("profile")} title="COMPLETED">
-            <CollectionRow icon="gem" title="HONOR LOG" value={`${completedBarIds.length} / ${catalog.length}`} progress={Math.min(completedBarIds.length, 10)} total={10} />
-            {completedChallenges.length === 0 && <Text style={styles.emptyState}>No completed bars yet. Completed bars will show up here.</Text>}
-            {completedChallenges.map((challenge) => (
-              <CompletedBarRow key={challenge.id} challenge={challenge} onPress={() => openChallenge(challenge.id)} />
-            ))}
+            <CompletedLogScreen
+              completedBarIds={completedBarIds}
+              catalogCount={catalog.length}
+              completedChallenges={completedChallenges}
+              onOpenChallenge={openChallenge}
+              renderHonorLog={(completed, total) => (
+                <CollectionRow icon="gem" title="HONOR LOG" value={`${completed} / ${total}`} progress={Math.min(completed, 10)} total={10} />
+              )}
+              renderCompletedBar={(challenge, onPress) => <CompletedBarRow challenge={challenge} onPress={onPress} />}
+            />
           </DetailScreen>
         )}
 
@@ -2184,95 +1756,6 @@ function AppScreen({ title, right, children }: { title: string; right?: React.Re
   );
 }
 
-function catalogStatusLabel(status: "local" | "loading" | "remote" | "error") {
-  if (status === "remote") return "Supabase";
-  if (status === "loading") return "Loading";
-  if (status === "error") return "Local fallback";
-  return "Local";
-}
-
-function plansStatusLabel(status: "local" | "loading" | "remote" | "error") {
-  if (status === "remote") return "Supabase";
-  if (status === "loading") return "Loading";
-  if (status === "error") return "Local fallback";
-  return "Local";
-}
-
-function getRankProgress(xp: number) {
-  const ranks = [
-    { name: "Froshling", min: 0 },
-    { name: "Patch Collector", min: 1000 },
-    { name: "Lore Bearer", min: 3000 },
-    { name: "Campus Legend", min: 6000 }
-  ];
-  const currentIndex = Math.max(0, ranks.findIndex((rank, index) => xp >= rank.min && (!ranks[index + 1] || xp < ranks[index + 1].min)));
-  const current = ranks[currentIndex];
-  const next = ranks[currentIndex + 1];
-
-  if (!next) {
-    return { current: current.name, next: "Max rank", progress: 100, remaining: 0, target: current.min };
-  }
-
-  return {
-    current: current.name,
-    next: next.name,
-    progress: Math.min(100, ((xp - current.min) / (next.min - current.min)) * 100),
-    remaining: Math.max(0, next.min - xp),
-    target: next.min
-  };
-}
-
-function formatCreateTime(date: Date) {
-  return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-}
-
-function formatCreatedPlanTime(startsAt: Date) {
-  const time = startsAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  return `${startsAt.toLocaleDateString([], { month: "short", day: "numeric" })} Â· ${time}`;
-}
-
-function parseCreateTime(value: string) {
-  const match = value.trim().match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/i);
-  if (!match) return null;
-
-  let hour = Number.parseInt(match[1], 10);
-  const minute = match[2] ? Number.parseInt(match[2], 10) : 0;
-  const meridiem = match[3]?.toLowerCase();
-
-  if (minute > 59) return null;
-  if (meridiem) {
-    if (hour < 1 || hour > 12) return null;
-    if (meridiem === "pm" && hour !== 12) hour += 12;
-    if (meridiem === "am" && hour === 12) hour = 0;
-  } else if (hour > 23) {
-    return null;
-  }
-
-  return { hour, minute };
-}
-
-function buildCreatePlanSchedule(day: CreatePlanDay, time: string, durationMinutes: number) {
-  const parsed = parseCreateTime(time);
-  if (!parsed) return null;
-
-  const startsAt = new Date();
-  if (day === "Tomorrow") startsAt.setDate(startsAt.getDate() + 1);
-  startsAt.setHours(parsed.hour, parsed.minute, 0, 0);
-
-  if (startsAt <= new Date()) return null;
-
-  return {
-    startsAt,
-    endsAt: new Date(startsAt.getTime() + durationMinutes * 60 * 1000)
-  };
-}
-
-function sameMinute(startsAtIso: string, target: Date) {
-  const existing = new Date(startsAtIso);
-  if (Number.isNaN(existing.getTime())) return false;
-  return Math.floor(existing.getTime() / 60000) === Math.floor(target.getTime() / 60000);
-}
-
 function DetailScreen({ back, title, children }: { back: () => void; title?: string; children: React.ReactNode }) {
   return (
     <View style={styles.flex}>
@@ -2283,65 +1766,6 @@ function DetailScreen({ back, title, children }: { back: () => void; title?: str
       </View>
       <ScrollView contentContainerStyle={styles.screenContent}>{children}</ScrollView>
     </View>
-  );
-}
-
-function BottomTabs({ active, onChange }: { active: Screen; onChange: (screen: Screen) => void }) {
-  const tabs: { screen: Screen; label: string; icon: React.ReactNode }[] = [
-    { screen: "discover", label: "Discover", icon: <Map color={active === "discover" ? colors.ink : colors.muted} size={20} /> },
-    { screen: "catalog", label: "Catalog", icon: <BookOpen color={active === "catalog" ? colors.ink : colors.muted} size={20} /> },
-    { screen: "create", label: "", icon: <Plus color={colors.cream} size={26} /> },
-    { screen: "chats", label: "Chat", icon: <MessageCircle color={active === "chat" || active === "chats" || active === "dmThread" ? colors.ink : colors.muted} size={20} /> },
-    { screen: "profile", label: "Profile", icon: <UserRound color={active === "profile" ? colors.ink : colors.muted} size={20} /> }
-  ];
-  return (
-    <View style={styles.bottomTabs}>
-      {tabs.map((tab) => (
-        <Pressable key={tab.screen} onPress={() => onChange(tab.screen)} style={tab.screen === "create" ? styles.createTab : styles.tab}>
-          {tab.icon}
-          {!!tab.label && <Text style={[styles.tabText, (active === tab.screen || (tab.screen === "chats" && (active === "chat" || active === "dmThread"))) && styles.tabTextActive]}>{tab.label}</Text>}
-        </Pressable>
-      ))}
-    </View>
-  );
-}
-
-function BrandMark() {
-  return (
-    <View style={styles.brandMark}>
-      <Crown color={colors.gold} size={20} fill={colors.gold} />
-      <Text style={styles.brandMarkText}>R</Text>
-    </View>
-  );
-}
-
-function FieldLabel({ text }: { text: string }) {
-  return <Text style={styles.fieldLabel}>{text}</Text>;
-}
-
-function SearchBar({ value, onChange, placeholder }: { value: string; onChange: (text: string) => void; placeholder: string }) {
-  return (
-    <View style={styles.searchBar}>
-      <Search color={colors.ink} size={18} />
-      <TextInput value={value} onChangeText={onChange} placeholder={placeholder} placeholderTextColor={colors.muted} style={styles.searchInput} />
-      <Filter color={colors.ink} size={18} />
-    </View>
-  );
-}
-
-function FilterRow({ labels }: { labels: string[] }) {
-  return <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>{labels.map((label, index) => <Tag key={label} text={label} active={index === 0} />)}</ScrollView>;
-}
-
-function ChoiceFilterRow({ labels, value, onChange }: { labels: string[]; value: string; onChange: (value: string) => void }) {
-  return (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
-      {labels.map((label) => (
-        <Pressable key={label} onPress={() => onChange(label)}>
-          <Tag text={label} active={label === value} />
-        </Pressable>
-      ))}
-    </ScrollView>
   );
 }
 
@@ -2358,77 +1782,6 @@ function SectionHeader({ title, action, onAction }: { title: string; action?: st
           <Text style={styles.sectionAction}>{action}</Text>
         </Pressable>
       )}
-    </View>
-  );
-}
-
-function NotificationBell({ count, onPress }: { count: number; onPress: () => void }) {
-  return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.notificationBell, pressedScale(pressed)]}>
-      <Bell color={colors.ink} size={21} />
-      {count > 0 && (
-        <View style={styles.notificationCount}>
-          <Text style={styles.notificationCountText}>{count > 9 ? "9+" : count}</Text>
-        </View>
-      )}
-    </Pressable>
-  );
-}
-
-function NotificationRow({
-  notification,
-  challenge,
-  onPress
-}: {
-  notification: PlanNotification;
-  challenge?: Challenge;
-  onPress: () => void;
-}) {
-  const unread = !notification.readAt;
-  const isDm = notification.kind === "dm_message";
-  const isFriendRequest = notification.kind === "friend_request";
-  const isPlanInvite = notification.kind === "plan_invite";
-  const isPlanCanceled = notification.kind === "plan_canceled";
-  const time = notification.plan?.startsAt
-    ? new Date(notification.plan.startsAt).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
-    : new Date(notification.createdAt).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-  const meta = isDm ? "Direct message" : isFriendRequest ? "Friend request" : isPlanInvite ? "Plan invite" : isPlanCanceled ? "Canceled plan" : notification.plan?.locationName ?? challenge?.name ?? "Group chat";
-
-  return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.notificationRow, unread && styles.notificationRowUnread, pressedScale(pressed)]}>
-      <View style={styles.notificationIcon}>
-        <AvatarIcon avatar={isDm || isFriendRequest ? "crown" : challenge?.icon ?? "star"} color={unread ? colors.gold : colors.ink} size={22} />
-      </View>
-      <View style={styles.flex}>
-        <Text style={styles.notificationTitle}>{notification.title}</Text>
-        <Text style={styles.notificationBody}>{notification.body}</Text>
-        <Text style={styles.notificationMeta}>{meta} - {time}</Text>
-      </View>
-      {unread && <View style={styles.unreadDot} />}
-    </Pressable>
-  );
-}
-
-function DiscoverHeaderActions({
-  count,
-  onNotifications,
-  onPeople,
-  onLeaderboard
-}: {
-  count: number;
-  onNotifications: () => void;
-  onPeople: () => void;
-  onLeaderboard: () => void;
-}) {
-  return (
-    <View style={styles.headerActions}>
-      <Pressable accessibilityLabel="Find people" onPress={onPeople} style={({ pressed }) => [styles.headerIconButton, pressedScale(pressed)]}>
-        <Users color={colors.ink} size={20} />
-      </Pressable>
-      <Pressable accessibilityLabel="Leaderboard" onPress={onLeaderboard} style={({ pressed }) => [styles.headerIconButton, pressedScale(pressed)]}>
-        <Award color={colors.ink} size={20} />
-      </Pressable>
-      <NotificationBell count={count} onPress={onNotifications} />
     </View>
   );
 }
@@ -2620,68 +1973,8 @@ function ChallengeHero({ challenge, compact }: { challenge: Challenge; compact?:
   );
 }
 
-function SelectedChallenge({ challenge }: { challenge: Challenge }) {
-  return <View style={styles.selectedChallenge}><AvatarIcon avatar={challenge.icon} color={colors.gold} size={26} /><View style={styles.flex}><Text style={styles.selectedChallengeTitle}>{challenge.name.toUpperCase()}</Text><Text style={styles.selectedChallengeMeta}>{challenge.difficulty} Â· {challenge.xp} XP</Text></View><Check color={colors.cream} size={16} style={styles.selectedCheck} /></View>;
-}
-
-function ChallengePicker({
-  catalog,
-  selectedChallenge,
-  open,
-  onToggle,
-  onSelect
-}: {
-  catalog: Challenge[];
-  selectedChallenge: Challenge;
-  open: boolean;
-  onToggle: () => void;
-  onSelect: (challengeId: string) => void;
-}) {
-  return (
-    <View style={styles.challengePicker}>
-      <Pressable onPress={onToggle} style={styles.challengePickerButton}>
-        <AvatarIcon avatar={selectedChallenge.icon} color={colors.gold} size={26} />
-        <View style={styles.flex}>
-          <Text style={styles.selectedChallengeTitle}>{selectedChallenge.name.toUpperCase()}</Text>
-          <Text style={styles.selectedChallengeMeta}>{selectedChallenge.difficulty} Â· {selectedChallenge.xp} XP</Text>
-        </View>
-        <ChevronDown color={colors.ink} size={20} />
-      </Pressable>
-      {open && (
-        <ScrollView nestedScrollEnabled style={styles.challengePickerMenu}>
-          {catalog.map((challenge) => {
-            const selected = challenge.id === selectedChallenge.id;
-            return (
-              <Pressable
-                key={challenge.id}
-                onPress={() => onSelect(challenge.id)}
-                style={[styles.challengePickerOption, selected && styles.challengePickerOptionActive]}
-              >
-                <AvatarIcon avatar={challenge.icon} color={selected ? colors.cream : colors.ink} size={20} />
-                <View style={styles.flex}>
-                  <Text numberOfLines={1} style={[styles.challengePickerOptionTitle, selected && styles.challengePickerOptionTitleActive]}>
-                    {challenge.name}
-                  </Text>
-                  <Text style={[styles.challengePickerOptionMeta, selected && styles.challengePickerOptionMetaActive]}>
-                    {challenge.difficulty} Â· {challenge.xp} XP
-                  </Text>
-                </View>
-                {selected && <Check color={colors.cream} size={16} />}
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-      )}
-    </View>
-  );
-}
-
 function ProgressSteps() {
   return <View style={styles.progressSteps}>{["1", "2", "3", "4", "5"].map((step, index) => <React.Fragment key={step}><View style={[styles.progressDot, index === 0 && styles.progressDotActive]}><Text style={[styles.progressDotText, index === 0 && styles.progressDotTextActive]}>{step}</Text></View>{index < 4 && <View style={styles.progressLine} />}</React.Fragment>)}</View>;
-}
-
-function PlanInfoRow({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
-  return <View style={styles.infoRow}><View style={styles.infoIcon}>{icon}</View><Text style={styles.infoLabel}>{label}</Text><Text style={styles.infoValue}>{value}</Text></View>;
 }
 
 function Tag({ text, active }: { text: string; active?: boolean }) {
@@ -2699,11 +1992,6 @@ function PatchButton({ label, tone, onPress }: { label: string; tone: "navy" | "
 
 function OutlineButton({ label, onPress }: { label: string; onPress?: () => void }) {
   return <Pressable onPress={onPress} style={({ pressed }) => [styles.outlineButton, pressedScale(pressed)]}><Text style={styles.outlineButtonText}>{label}</Text></Pressable>;
-}
-
-function Badge({ icon, label, tone }: { icon: AvatarId; label: string; tone: "red" | "navy" | "green" | "gold" }) {
-  const bg = tone === "red" ? colors.red : tone === "navy" ? colors.navy : tone === "green" ? colors.green : colors.gold;
-  return <View style={[styles.badge, { backgroundColor: bg }]}><AvatarIcon avatar={icon} color={colors.cream} size={22} /><Text style={styles.badgeText}>{label}</Text></View>;
 }
 
 function CollectionRow({ icon, title, value, progress, total }: { icon: AvatarId; title: string; value: string; progress: number; total: number }) {
@@ -2751,15 +2039,6 @@ function CompletedBarRow({ challenge, onPress }: { challenge: Challenge; onPress
   );
 }
 
-function AvatarIcon({ avatar, color, size }: { avatar: AvatarId; color: string; size: number }) {
-  if (avatar === "crown") return <Crown color={color} size={size} />;
-  if (avatar === "gear") return <Wrench color={color} size={size} />;
-  if (avatar === "cap") return <GraduationCap color={color} size={size} />;
-  if (avatar === "gem") return <Gem color={color} size={size} />;
-  if (avatar === "hall") return <Landmark color={color} size={size} />;
-  return <Star color={color} size={size} />;
-}
-
 function patchTone(tone: ChallengeTone) {
   if (tone === "red") return { bg: colors.red, border: "#741415", text: colors.cream };
   if (tone === "green") return { bg: colors.green, border: "#0C3A1D", text: colors.cream };
@@ -2772,21 +2051,8 @@ const styles = StyleSheet.create({
   phone: { flex: 1, backgroundColor: colors.paper, alignSelf: "center", width: "100%", maxWidth: 520, borderColor: colors.line, borderLeftWidth: 1, borderRightWidth: 1 },
   flex: { flex: 1 },
   pressedScale: { transform: [{ scale: 0.96 }] },
-  loginScreen: { flex: 1, justifyContent: "center", padding: 24 },
-  onboarding: { padding: 24, paddingBottom: 44, minHeight: "100%" },
-  brandMark: { alignSelf: "center", alignItems: "center", justifyContent: "center", width: 56, height: 56, borderRadius: 12, borderWidth: 2, borderColor: colors.ink, backgroundColor: colors.navy, marginBottom: 8 },
-  brandMarkText: { color: colors.cream, fontWeight: "900", fontSize: 17 },
-  welcomePill: { alignSelf: "center", color: colors.muted, fontSize: 11, fontWeight: "800", borderWidth: 1, borderColor: colors.line, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 4 },
-  heroTitle: { textAlign: "center", color: colors.ink, fontSize: 30, fontWeight: "900", marginTop: 4 },
-  heroSubtitle: { textAlign: "center", color: colors.ink, fontSize: 14, marginBottom: 20 },
-  fieldLabel: { color: colors.ink, fontSize: 11, fontWeight: "900", marginTop: 14, marginBottom: 5 },
   inputShell: { flexDirection: "row", alignItems: "center", borderWidth: 1, borderColor: colors.line, borderRadius: 7, backgroundColor: colors.paperLight, paddingHorizontal: 10 },
   input: { flex: 1, color: colors.ink, fontSize: 14, paddingVertical: 10 },
-  segmentRow: { flexDirection: "row", gap: 6 },
-  segment: { flex: 1, alignItems: "center", paddingVertical: 8, borderRadius: 16, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.paperLight },
-  segmentActive: { backgroundColor: colors.ink, borderColor: colors.ink },
-  segmentText: { color: colors.ink, fontSize: 11, fontWeight: "800" },
-  segmentTextActive: { color: colors.cream },
   formRow: { flexDirection: "row", gap: 8 },
   formInputShell: { flex: 1 },
   durationSummary: { minWidth: 104, borderWidth: 1, borderColor: colors.line, borderRadius: 7, backgroundColor: colors.paperLight, paddingHorizontal: 10, paddingVertical: 8, justifyContent: "center" },
@@ -2795,11 +2061,6 @@ const styles = StyleSheet.create({
   avatarGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   avatarOption: { width: 58, height: 58, alignItems: "center", justifyContent: "center", backgroundColor: colors.paperLight, borderWidth: 1, borderColor: colors.line, borderRadius: 7 },
   avatarOptionActive: { backgroundColor: colors.navy, borderColor: colors.gold, borderWidth: 2 },
-  guidelineRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 18, marginBottom: 4 },
-  checkbox: { width: 14, height: 14, borderWidth: 1, borderColor: colors.line, borderRadius: 2, backgroundColor: colors.paperLight },
-  guidelineText: { color: colors.muted, fontSize: 11 },
-  handNote: { alignSelf: "flex-end", color: colors.ink, fontSize: 13, fontStyle: "italic", textAlign: "right", marginTop: 12 },
-  authMessage: { color: colors.ink, fontSize: 13, fontWeight: "700", lineHeight: 19, marginTop: 12, textAlign: "center" },
   appHeader: { position: "relative", flexDirection: "row", alignItems: "center", justifyContent: "space-between", height: 54, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: colors.line, backgroundColor: colors.paperLight },
   detailHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", height: 48, paddingHorizontal: 12, backgroundColor: colors.paperLight },
   headerLeft: { width: 112, alignItems: "flex-start", justifyContent: "center" },
@@ -2812,7 +2073,6 @@ const styles = StyleSheet.create({
   screenContent: { padding: 14, paddingBottom: 90 },
   searchBar: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: colors.paperLight, borderWidth: 1, borderColor: colors.line, borderRadius: 8, paddingHorizontal: 10, marginBottom: 10 },
   searchInput: { flex: 1, color: colors.ink, fontSize: 13, paddingVertical: 10 },
-  filterRow: { gap: 6, paddingBottom: 4 },
   tag: { borderWidth: 1, borderColor: colors.line, backgroundColor: colors.paperLight, borderRadius: 14, paddingHorizontal: 9, paddingVertical: 5 },
   tagActive: { backgroundColor: colors.gold, borderColor: colors.gold },
   tagText: { color: colors.ink, fontSize: 11, fontWeight: "700" },
@@ -2824,13 +2084,6 @@ const styles = StyleSheet.create({
   notificationBell: { width: 40, height: 40, alignItems: "center", justifyContent: "center" },
   notificationCount: { position: "absolute", top: 0, right: 0, minWidth: 16, height: 16, borderRadius: 8, backgroundColor: colors.red, borderWidth: 1, borderColor: colors.paperLight, alignItems: "center", justifyContent: "center", paddingHorizontal: 3 },
   notificationCountText: { color: colors.cream, fontSize: 9, fontWeight: "900" },
-  notificationRow: { flexDirection: "row", alignItems: "flex-start", gap: 10, borderWidth: 1, borderColor: colors.line, borderRadius: 8, backgroundColor: colors.paperLight, padding: 11, marginBottom: 9 },
-  notificationRowUnread: { borderColor: colors.gold, backgroundColor: "#182B45" },
-  notificationIcon: { width: 34, height: 34, borderRadius: 17, borderWidth: 1, borderColor: colors.gold, alignItems: "center", justifyContent: "center", backgroundColor: colors.paper },
-  notificationTitle: { color: colors.ink, fontSize: 13, fontWeight: "900" },
-  notificationBody: { color: colors.ink, fontSize: 12, lineHeight: 17, marginTop: 3 },
-  notificationMeta: { color: colors.muted, fontSize: 11, fontWeight: "700", marginTop: 5 },
-  unreadDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.red, marginTop: 5 },
   peopleRow: { flexDirection: "row", alignItems: "center", gap: 10, borderWidth: 1, borderColor: colors.line, borderRadius: 8, backgroundColor: colors.paperLight, padding: 11, marginBottom: 9 },
   peopleAvatar: { width: 42, height: 42, borderRadius: 21, borderWidth: 2, borderColor: colors.gold, backgroundColor: colors.navy, alignItems: "center", justifyContent: "center" },
   peopleName: { color: colors.ink, fontSize: 14, fontWeight: "900" },
@@ -2924,44 +2177,6 @@ const styles = StyleSheet.create({
   bioBox: { minHeight: 88, borderWidth: 1, borderColor: colors.line, borderRadius: 7, backgroundColor: colors.paperLight, padding: 9 },
   bioInput: { minHeight: 54, color: colors.ink, fontSize: 13, lineHeight: 18, padding: 0, textAlignVertical: "top" },
   counter: { alignSelf: "flex-end", color: colors.muted, fontSize: 10, marginTop: 7 },
-  infoRow: { flexDirection: "row", alignItems: "flex-start", paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.line },
-  infoIcon: { width: 28, paddingTop: 1 },
-  infoLabel: { width: 78, color: colors.ink, fontSize: 11, fontWeight: "900" },
-  infoValue: { flex: 1, color: colors.ink, fontSize: 13, lineHeight: 18 },
-  chatScreen: { flex: 1 },
-  chatHeader: { paddingVertical: 10, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: colors.line, backgroundColor: colors.paperLight },
-  chatHeaderTop: { flexDirection: "row", alignItems: "center" },
-  chatHeaderTitleBlock: { flex: 1, alignItems: "center" },
-  chatTitle: { color: colors.ink, fontSize: 18, fontWeight: "900" },
-  chatStatus: { color: colors.green, fontSize: 11, marginTop: 2 },
-  chatMembersButton: { width: 40, height: 40, alignItems: "center", justifyContent: "center" },
-  chatLeaveButton: { alignSelf: "center", marginTop: 8, borderWidth: 1, borderColor: colors.line, borderRadius: 999, backgroundColor: colors.paperLight, paddingHorizontal: 12, paddingVertical: 6 },
-  chatLeaveButtonText: { color: colors.muted, fontSize: 10, fontWeight: "900" },
-  chatMembersOverlay: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, zIndex: 20, flexDirection: "row", justifyContent: "flex-end" },
-  chatMembersBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.38)" },
-  chatMembersDrawer: { width: 260, backgroundColor: "#0D1A2B", borderLeftWidth: 1, borderLeftColor: colors.gold, padding: 14 },
-  chatMembersDrawerHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  chatMembersTitle: { color: colors.ink, fontSize: 14, fontWeight: "900" },
-  chatMembersClose: { width: 36, height: 36, alignItems: "center", justifyContent: "center" },
-  chatMembersCloseText: { color: colors.ink, fontSize: 14, fontWeight: "900" },
-  chatMembersCount: { color: colors.ink, fontSize: 11, fontWeight: "800", marginTop: 2, marginBottom: 12 },
-  chatMemberRow: { minHeight: 44, flexDirection: "row", alignItems: "center", gap: 9, borderWidth: 1, borderColor: "#4F6F96", borderRadius: 8, backgroundColor: "#172943", paddingHorizontal: 10, paddingVertical: 8, marginBottom: 8 },
-  chatMemberAvatar: { width: 28, height: 28, borderRadius: 14, backgroundColor: colors.gold, alignItems: "center", justifyContent: "center" },
-  chatMemberRowText: { color: colors.ink, fontSize: 13, fontWeight: "900" },
-  chatList: { padding: 14, paddingBottom: 82 },
-  systemMessage: { alignSelf: "center", backgroundColor: colors.cream, borderWidth: 1, borderColor: colors.line, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 5, marginBottom: 11 },
-  systemMessageText: { color: colors.muted, fontSize: 11, fontWeight: "800" },
-  messageRow: { flexDirection: "row", gap: 7, marginBottom: 11, alignItems: "flex-start" },
-  messageRowMine: { flexDirection: "row-reverse" },
-  miniAvatar: { width: 27, height: 27, borderRadius: 14, backgroundColor: colors.gold, alignItems: "center", justifyContent: "center" },
-  messageBubble: { maxWidth: "78%", backgroundColor: colors.paperLight, borderWidth: 1, borderColor: colors.line, borderRadius: 7, padding: 8 },
-  messageBubbleMine: { backgroundColor: "#1B3B56", borderColor: "#315B7A" },
-  messageFrom: { color: colors.ink, fontSize: 11, fontWeight: "900", marginBottom: 3 },
-  messageText: { color: colors.ink, fontSize: 13, lineHeight: 18 },
-  composer: { position: "absolute", left: 0, right: 0, bottom: 58, flexDirection: "row", alignItems: "center", gap: 8, padding: 9, borderTopWidth: 1, borderTopColor: colors.line, backgroundColor: colors.paperLight },
-  composerInput: { flex: 1, borderWidth: 1, borderColor: colors.line, borderRadius: 16, paddingHorizontal: 10, paddingVertical: 7, fontSize: 12, color: colors.ink },
-  sendButton: { width: 30, height: 30, borderRadius: 15, backgroundColor: colors.gold, alignItems: "center", justifyContent: "center" },
-  sendButtonDisabled: { opacity: 0.55 },
   profileTop: { flexDirection: "row", alignItems: "center", gap: 10 },
   profileAvatar: { width: 70, height: 70, borderRadius: 35, borderWidth: 3, borderColor: colors.gold, backgroundColor: colors.navy, alignItems: "center", justifyContent: "center" },
   profileNameBlock: { flex: 1, gap: 3 },
@@ -2978,8 +2193,6 @@ const styles = StyleSheet.create({
   progressFill: { height: "100%", backgroundColor: colors.navy },
   progressHint: { color: colors.ink, fontSize: 10, alignSelf: "flex-end", marginTop: 4 },
   badgeRow: { flexDirection: "row", gap: 8 },
-  badge: { flex: 1, minHeight: 66, borderRadius: 8, borderWidth: 1, borderColor: colors.gold, alignItems: "center", justifyContent: "center", padding: 5 },
-  badgeText: { color: colors.cream, fontSize: 8, fontWeight: "900", textAlign: "center", marginTop: 4 },
   collectionRow: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: colors.paperLight, borderWidth: 1, borderColor: colors.line, borderRadius: 7, padding: 9, marginBottom: 7 },
   collectionIcon: { width: 30, height: 30, borderRadius: 6, borderWidth: 1, borderColor: colors.line, alignItems: "center", justifyContent: "center" },
   collectionTitle: { color: colors.ink, fontSize: 12, fontWeight: "900" },
@@ -3000,10 +2213,5 @@ const styles = StyleSheet.create({
   completedBarMeta: { color: colors.muted, fontSize: 11, fontWeight: "700", marginTop: 2 },
   stitchProgress: { flexDirection: "row", gap: 2, marginTop: 5, flexWrap: "wrap" },
   stitchUnit: { width: 8, height: 4, borderRadius: 2, borderWidth: 1, borderColor: colors.line },
-  stitchUnitDone: { backgroundColor: colors.green, borderColor: colors.green },
-  bottomTabs: { position: "absolute", left: 0, right: 0, bottom: 0, height: 60, flexDirection: "row", alignItems: "center", justifyContent: "space-around", backgroundColor: colors.paperLight, borderTopWidth: 1, borderTopColor: colors.line },
-  tab: { width: 58, alignItems: "center", gap: 2 },
-  tabText: { color: colors.muted, fontSize: 9, fontWeight: "700" },
-  tabTextActive: { color: colors.ink },
-  createTab: { width: 48, height: 48, marginTop: -18, borderRadius: 24, backgroundColor: colors.gold, borderWidth: 2, borderColor: colors.ink, alignItems: "center", justifyContent: "center" }
+  stitchUnitDone: { backgroundColor: colors.green, borderColor: colors.green }
 });
