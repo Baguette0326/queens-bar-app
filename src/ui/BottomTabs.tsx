@@ -2,7 +2,7 @@ import React from "react";
 import { BookOpen, Map, MessageCircle, Plus, UserRound } from "lucide-react-native";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import type { Screen } from "../app/types";
-import { colors } from "./theme";
+import { colors, interaction } from "./theme";
 
 export function BottomTabs({ active, onChange }: { active: Screen; onChange: (screen: Screen) => void }) {
   const tabs: { screen: Screen; label: string; icon: React.ReactNode }[] = [
@@ -20,7 +20,14 @@ export function BottomTabs({ active, onChange }: { active: Screen; onChange: (sc
   return (
     <View style={styles.bottomTabs}>
       {tabs.map((tab) => (
-        <Pressable key={tab.screen} onPress={() => onChange(tab.screen)} style={tab.screen === "create" ? styles.createTab : styles.tab}>
+        <Pressable
+          key={tab.screen}
+          onPress={() => onChange(tab.screen)}
+          style={({ pressed }) => [
+            tab.screen === "create" ? styles.createTab : styles.tab,
+            pressed && styles.pressed
+          ]}
+        >
           {tab.icon}
           {!!tab.label && (
             <Text style={[styles.tabText, (active === tab.screen || (tab.screen === "chats" && (active === "chat" || active === "dmThread"))) && styles.tabTextActive]}>
@@ -38,5 +45,6 @@ const styles = StyleSheet.create({
   tab: { width: 58, alignItems: "center", gap: 2 },
   tabText: { color: colors.muted, fontSize: 9, fontWeight: "700" },
   tabTextActive: { color: colors.ink },
-  createTab: { width: 48, height: 48, marginTop: -18, borderRadius: 24, backgroundColor: colors.gold, borderWidth: 2, borderColor: colors.ink, alignItems: "center", justifyContent: "center" }
+  createTab: { width: 48, height: 48, marginTop: -18, borderRadius: 24, backgroundColor: colors.gold, borderWidth: 2, borderColor: colors.ink, alignItems: "center", justifyContent: "center" },
+  pressed: { transform: [{ scale: interaction.pressedScale }] }
 });

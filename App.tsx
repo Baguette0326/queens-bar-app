@@ -40,6 +40,7 @@ import { getPatchProgress, getRankProgress, getUsernameCooldown } from "./src/ap
 import type { CreatePlanDay, Plan, Screen } from "./src/app/types";
 import { AvatarIcon } from "./src/ui/AvatarIcon";
 import { BottomTabs } from "./src/ui/BottomTabs";
+import { OutlineButton, PatchButton } from "./src/ui/Buttons";
 import { dataStatusLabel } from "./src/ui/statusLabels";
 import { colors } from "./src/ui/theme";
 import { CatalogScreen } from "./src/screens/CatalogScreen";
@@ -1985,15 +1986,6 @@ function StatBlock({ value, label }: { value: string; label: string }) {
   return <View style={styles.statBlock}><Text style={styles.statBlockValue}>{value}</Text><Text style={styles.statBlockLabel}>{label}</Text></View>;
 }
 
-function PatchButton({ label, tone, onPress }: { label: string; tone: "navy" | "red" | "green"; onPress: () => void }) {
-  const backgroundColor = tone === "navy" ? colors.navy : tone === "red" ? colors.red : colors.green;
-  return <Pressable onPress={onPress} style={({ pressed }) => [styles.patchButton, { backgroundColor }, pressedScale(pressed)]}><Text style={styles.patchButtonText}>{label}</Text></Pressable>;
-}
-
-function OutlineButton({ label, onPress }: { label: string; onPress?: () => void }) {
-  return <Pressable onPress={onPress} style={({ pressed }) => [styles.outlineButton, pressedScale(pressed)]}><Text style={styles.outlineButtonText}>{label}</Text></Pressable>;
-}
-
 function CollectionRow({ icon, title, value, progress, total }: { icon: AvatarId; title: string; value: string; progress: number; total: number }) {
   return <View style={styles.collectionRow}><View style={styles.collectionIcon}><AvatarIcon avatar={icon} color={colors.green} size={20} /></View><View style={styles.flex}><Text style={styles.collectionTitle}>{title}</Text><View style={styles.stitchProgress}>{Array.from({ length: total }).map((_, index) => <View key={index} style={[styles.stitchUnit, index < progress && styles.stitchUnitDone]} />)}</View></View><Text style={styles.collectionValue}>{value}</Text></View>;
 }
@@ -2136,10 +2128,6 @@ const styles = StyleSheet.create({
   statBlock: { flex: 1, alignItems: "center", backgroundColor: colors.paperLight, borderWidth: 1, borderColor: colors.line, borderRadius: 7, paddingVertical: 12 },
   statBlockValue: { color: colors.ink, fontSize: 20, fontWeight: "900", fontVariant: ["tabular-nums"] },
   statBlockLabel: { color: colors.ink, fontSize: 11, fontWeight: "700" },
-  patchButton: { borderWidth: 2, borderColor: colors.gold, borderStyle: "dashed", borderRadius: 8, alignItems: "center", paddingVertical: 13, marginTop: 12 },
-  patchButtonText: { color: colors.cream, fontSize: 16, fontWeight: "900" },
-  outlineButton: { borderWidth: 1, borderColor: colors.line, borderRadius: 7, alignItems: "center", paddingVertical: 11, marginTop: 9, backgroundColor: colors.paperLight },
-  outlineButtonText: { color: colors.ink, fontSize: 14, fontWeight: "900" },
   progressSteps: { flexDirection: "row", alignItems: "center", marginBottom: 12 },
   progressDot: { width: 21, height: 21, borderWidth: 1, borderColor: colors.ink, borderRadius: 11, alignItems: "center", justifyContent: "center", backgroundColor: colors.paperLight },
   progressDotActive: { backgroundColor: colors.ink },
