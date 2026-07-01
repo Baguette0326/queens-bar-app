@@ -1444,7 +1444,6 @@ export default function App() {
             onNotifications={openNotifications}
             onPeople={() => go("people")}
             onLeaderboard={() => go("leaderboard")}
-            renderPlan={(plan, planCatalog, onPress) => <PlanPatch plan={plan} catalog={planCatalog} onPress={onPress} />}
           />
         )}
 
@@ -1535,9 +1534,6 @@ export default function App() {
             onDifficultyChange={setDifficulty}
             onCompletionFilterChange={setCompletionFilter}
             onOpenChallenge={openChallenge}
-            renderChallenge={(challenge, pinned, completed, onPress) => (
-              <ChallengePatch challenge={challenge} pinned={pinned} completed={completed} onPress={onPress} />
-            )}
           />
         )}
 
