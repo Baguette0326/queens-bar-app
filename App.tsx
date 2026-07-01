@@ -34,6 +34,7 @@ import { cancelPlan as cancelRemotePlan, createPlan as createRemotePlan, fetchPl
 import { createProfile, fetchProfile, getRankFromXp, Profile, roleDbToLabel, updateProfileDetails, updateProfileXp } from "./src/data/profileRepository";
 import { describeSupabaseError } from "./src/data/supabaseError";
 import { supabase } from "./src/lib/supabase";
+import { avatarOptions, startingPlans } from "./src/app/demoData";
 import { readStoredScreen, writeStoredScreen } from "./src/app/navigation";
 import { buildCreatePlanSchedule, formatCreatedPlanTime, formatCreateTime, parseCreateTime, sameMinute } from "./src/app/planSchedule";
 import { getPatchProgress, getRankProgress, getUsernameCooldown } from "./src/app/profileProgress";
@@ -59,54 +60,6 @@ import { PeopleScreen } from "./src/screens/PeopleScreen";
 import { PlanDetailScreen } from "./src/screens/PlanDetailScreen";
 import { ProfileScreen } from "./src/screens/ProfileScreen";
 import { PublicProfileScreen } from "./src/screens/PublicProfileScreen";
-
-const avatarOptions: { id: AvatarId; label: string }[] = [
-  { id: "crown", label: "Crown" },
-  { id: "gear", label: "Gear" },
-  { id: "cap", label: "Cap" },
-  { id: "gem", label: "Gem" },
-  { id: "hall", label: "Hall" },
-  { id: "star", label: "Star" }
-];
-
-const startingPlans: Plan[] = [
-  {
-    id: "plan-goodes",
-    challengeId: "advance-to-goodes",
-    place: "Goodes Hall",
-    detail: "main lobby",
-    startsAt: "Started 18m ago",
-    status: "ongoing",
-    attendees: ["WrenchKing", "BoltBoy", "NuttyProf", "Maya", "Sam", "Owen"],
-    cap: 12,
-    note: "Meet by the lobby. We will coordinate timing in chat.",
-    startedBy: "WrenchKing"
-  },
-  {
-    id: "plan-beerio",
-    challengeId: "beerio-kart",
-    place: "Residence Common Area",
-    detail: "main lounge",
-    startsAt: "Started 5m ago",
-    status: "ongoing",
-    attendees: ["BoltBoy", "NuttyProf", "Maya", "Sam", "Owen"],
-    cap: 8,
-    note: "Let's see whose plane flies the furthest. Paper provided.",
-    startedBy: "WrenchKing"
-  },
-  {
-    id: "plan-wizard",
-    challengeId: "wizard",
-    place: "Residence Common Area",
-    detail: "main lounge",
-    startsAt: "Tomorrow Â· 6:30 PM",
-    status: "upcoming",
-    attendees: ["Maya", "Sam", "Owen", "Lee", "Ari", "Noah"],
-    cap: 10,
-    note: "Meet at the entrance and keep an eye on chat.",
-    startedBy: "Maya"
-  }
-];
 
 export default function App() {
   const hasRoutedFromAuthRef = useRef(false);
