@@ -13,7 +13,6 @@ import {
   Platform
 } from "react-native";
 import {
-  Bookmark,
   Check,
   ChevronLeft,
   Crown,
@@ -1841,56 +1840,6 @@ function DmThreadRow({ thread, onPress }: { thread: RemoteDmThread; onPress: () 
   );
 }
 
-function ChallengePatch({ challenge, pinned, completed, onPress }: { challenge: Challenge; pinned?: boolean; completed?: boolean; onPress: () => void }) {
-  const tone = patchTone(challenge.tone);
-  const displayLabels = getChallengeCardLabels(challenge);
-  return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.challengePatch, { backgroundColor: tone.bg, borderColor: tone.border }, pressedScale(pressed)]}>
-      {pinned && (
-        <View style={styles.pinnedBadge}>
-          <Bookmark color={colors.cream} size={13} fill={colors.cream} />
-        </View>
-      )}
-      {completed && (
-        <View style={styles.completedBadge}>
-          <Check color={colors.cream} size={14} />
-        </View>
-      )}
-      <View style={styles.challengePatchIcon}><AvatarIcon avatar={challenge.icon} color={tone.text} size={34} /></View>
-      <Text
-        numberOfLines={2}
-        adjustsFontSizeToFit
-        minimumFontScale={0.72}
-        style={[styles.challengePatchTitle, { color: tone.text }]}
-      >
-        {challenge.name.toUpperCase()}
-      </Text>
-      <Text numberOfLines={3} style={[styles.challengePatchSummary, { color: tone.text }]}>{challenge.summary}</Text>
-      <View style={styles.challengePatchCategoryList}>
-        {displayLabels.map((label) => (
-          <View key={label} style={[styles.challengePatchCategoryPill, { borderColor: tone.text }]}>
-            <Text numberOfLines={1} style={[styles.challengePatchCategory, { color: tone.text }]}>{label}</Text>
-          </View>
-        ))}
-      </View>
-      <View style={styles.challengePatchFooter}><Text style={[styles.challengePatchMeta, { color: tone.text }]}>{challenge.difficulty}</Text><Text style={[styles.challengePatchMeta, { color: tone.text }]}>{challenge.xp} XP</Text></View>
-      {(challenge.interested > 0 || challenge.upcoming > 0) && (
-        <View style={styles.challengePatchStats}><Text style={{ color: tone.text }}>â™Ÿ {challenge.interested}</Text><Text style={{ color: tone.text }}>â–£ {challenge.upcoming}</Text></View>
-      )}
-    </Pressable>
-  );
-}
-
-function getChallengeCardLabels(challenge: Challenge) {
-  const hiddenLabels = new Set(["Shenanigans", "Review required", challenge.difficulty]);
-  const categoryLabels = getBrowseCategories(challenge).filter((label) => label !== "Unreviewed");
-  return [
-    challenge.difficulty,
-    ...(categoryLabels.length > 0 ? categoryLabels : ["Participation"]),
-    ...challenge.tags
-  ].filter((label, index, labels) => !hiddenLabels.has(label) && labels.indexOf(label) === index);
-}
-
 function PlanPatch({ plan, onPress, catalog }: { plan: Plan; onPress: () => void; catalog: Challenge[] }) {
   const challenge = catalog.find((item) => item.id === plan.challengeId) ?? challenges[0];
   const tone = patchTone(challenge.tone);
@@ -1992,16 +1941,6 @@ const styles = StyleSheet.create({
   phone: { flex: 1, backgroundColor: colors.paper, alignSelf: "center", width: "100%", maxWidth: 520, borderColor: colors.line, borderLeftWidth: 1, borderRightWidth: 1 },
   flex: { flex: 1 },
   pressedScale: { transform: [{ scale: 0.96 }] },
-  inputShell: { flexDirection: "row", alignItems: "center", borderWidth: 1, borderColor: colors.line, borderRadius: 7, backgroundColor: colors.paperLight, paddingHorizontal: 10 },
-  input: { flex: 1, color: colors.ink, fontSize: 14, paddingVertical: 10 },
-  formRow: { flexDirection: "row", gap: 8 },
-  formInputShell: { flex: 1 },
-  durationSummary: { minWidth: 104, borderWidth: 1, borderColor: colors.line, borderRadius: 7, backgroundColor: colors.paperLight, paddingHorizontal: 10, paddingVertical: 8, justifyContent: "center" },
-  durationSummaryLabel: { color: colors.muted, fontSize: 9, fontWeight: "900" },
-  durationSummaryValue: { color: colors.ink, fontSize: 13, fontWeight: "900", marginTop: 2, fontVariant: ["tabular-nums"] },
-  avatarGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  avatarOption: { width: 58, height: 58, alignItems: "center", justifyContent: "center", backgroundColor: colors.paperLight, borderWidth: 1, borderColor: colors.line, borderRadius: 7 },
-  avatarOptionActive: { backgroundColor: colors.navy, borderColor: colors.gold, borderWidth: 2 },
   appHeader: { position: "relative", flexDirection: "row", alignItems: "center", justifyContent: "space-between", height: 54, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: colors.line, backgroundColor: colors.paperLight },
   detailHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", height: 48, paddingHorizontal: 12, backgroundColor: colors.paperLight },
   headerLeft: { width: 112, alignItems: "flex-start", justifyContent: "center" },
@@ -2049,23 +1988,7 @@ const styles = StyleSheet.create({
   planPatchMeta: { fontSize: 11, marginTop: 2 },
   planPatchSide: { alignItems: "flex-end", gap: 8 },
   livePill: { backgroundColor: "#65A93D", color: colors.cream, fontSize: 9, fontWeight: "900", paddingHorizontal: 5, paddingVertical: 2, borderRadius: 3 },
-  catalogGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: 10 },
-  catalogCount: { color: colors.muted, fontSize: 11, fontWeight: "700", marginTop: 8 },
-  clearFilters: { alignSelf: "flex-start", marginTop: 5, paddingVertical: 4 },
-  clearFiltersText: { color: "#7DB7F0", fontSize: 11, fontWeight: "800" },
   emptyState: { color: colors.muted, fontSize: 13, lineHeight: 19, backgroundColor: colors.paperLight, borderWidth: 1, borderColor: colors.line, borderRadius: 8, padding: 12, marginBottom: 8 },
-  challengePatch: { position: "relative", width: "48.5%", minHeight: 238, borderWidth: 2, borderRadius: 8, padding: 11, borderStyle: "dashed", justifyContent: "space-between" },
-  pinnedBadge: { position: "absolute", top: 7, right: 7, width: 23, height: 23, borderRadius: 12, backgroundColor: colors.green, borderWidth: 1, borderColor: colors.gold, alignItems: "center", justifyContent: "center", zIndex: 2 },
-  completedBadge: { position: "absolute", top: 7, left: 7, width: 23, height: 23, borderRadius: 12, backgroundColor: colors.navy, borderWidth: 1, borderColor: colors.gold, alignItems: "center", justifyContent: "center", zIndex: 2 },
-  challengePatchIcon: { alignItems: "center", justifyContent: "center", minHeight: 42 },
-  challengePatchTitle: { minHeight: 42, fontSize: 17, lineHeight: 20, fontWeight: "900", textAlign: "center" },
-  challengePatchSummary: { minHeight: 48, fontSize: 10, lineHeight: 14, textAlign: "center", opacity: 0.88 },
-  challengePatchCategoryList: { minHeight: 22, flexDirection: "row", flexWrap: "wrap", justifyContent: "center", gap: 4 },
-  challengePatchCategoryPill: { maxWidth: "100%", borderWidth: 1, borderRadius: 10, paddingHorizontal: 7, paddingVertical: 3, opacity: 0.82 },
-  challengePatchCategory: { fontSize: 8, fontWeight: "800", textAlign: "center" },
-  challengePatchFooter: { flexDirection: "row", justifyContent: "space-between" },
-  challengePatchMeta: { fontSize: 11, fontWeight: "800" },
-  challengePatchStats: { flexDirection: "row", justifyContent: "space-between", opacity: 0.85 },
   challengeHero: { flexDirection: "row", alignItems: "center", borderWidth: 2, borderStyle: "dashed", borderRadius: 9, padding: 16, marginBottom: 12 },
   challengeHeroCompact: { padding: 12 },
   heroPatchBody: { flex: 1, alignItems: "center" },
