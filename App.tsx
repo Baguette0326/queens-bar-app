@@ -23,9 +23,9 @@ import { fetchCatalogBars } from "./src/data/catalogRepository";
 import { RemoteChatMessage, sendChatMessage } from "./src/data/chatRepository";
 import { fetchCompletedBarIds } from "./src/data/completionRepository";
 import { RemoteDmMessage, RemoteDmThread } from "./src/data/dmRepository";
-import { acceptFriendRequest, cancelFriendRequest, declineFriendRequest, fetchFriends, fetchFriendState, fetchIncomingFriendRequests, FriendRequest, FriendStatus, removeFriend, sendFriendRequest } from "./src/data/friendRepository";
+import { FriendRequest, FriendStatus } from "./src/data/friendRepository";
 import { fetchPinnedBarIds } from "./src/data/interestRepository";
-import { markNotificationRead, notifyFriendRequest, notifyPlanAttendees, notifyPlanCanceled, notifyPlanInvite, PlanNotification } from "./src/data/notificationRepository";
+import { markNotificationRead, notifyPlanAttendees, notifyPlanCanceled, PlanNotification } from "./src/data/notificationRepository";
 import { fetchLeaderboard, searchProfiles } from "./src/data/peopleRepository";
 import { cancelPlan as cancelRemotePlan, createPlan as createRemotePlan, fetchPlans, joinPlan as joinRemotePlan, leavePlan as leaveRemotePlan, RemotePlan } from "./src/data/planRepository";
 import { createProfile, fetchProfile, getRankFromXp, Profile, roleDbToLabel, updateProfileDetails } from "./src/data/profileRepository";
@@ -35,6 +35,7 @@ import { createBarActions } from "./src/app/barActions";
 import { createChatActions } from "./src/app/chatActions";
 import { confirmAction, showMessage } from "./src/app/dialogs";
 import { avatarOptions, startingPlans } from "./src/app/demoData";
+import { createFriendActions } from "./src/app/friendActions";
 import { readStoredScreen, writeStoredScreen } from "./src/app/navigation";
 import { buildCreatePlanSchedule, formatCreatedPlanTime, formatCreateTime, parseCreateTime, sameMinute } from "./src/app/planSchedule";
 import { getPatchProgress, getRankProgress, getUsernameCooldown } from "./src/app/profileProgress";
@@ -158,123 +159,6 @@ export default function App() {
     setSelectedPlanId,
     setSelectedPublicProfile
   });
-
-  async function requestFriendship() {
-    if (!session || !selectedPublicProfile || friendActionStatus === "saving") return;
-
-    setFriendActionStatus("saving");
-    try {
-      await sendFriendRequest(session.user.id, selectedPublicProfile.id);
-      notifyFriendRequest(
-        session.user.id,
-        selectedPublicProfile.id,
-        `${username} sent you a friend request`,
-        "Open People to accept or decline."
-      ).catch((error) => console.warn("Failed to notify friend request.", error));
-      await loadFriendsData(session.user.id);
-      const nextState = await fetchFriendState(session.user.id, selectedPublicProfile.id);
-      setFriendStatus(nextState.status);
-      setSelectedFriendRequestId(nextState.requestId);
-    } catch (error) {
-      const message = describeSupabaseError(error, "Could not send friend request. Run supabase/add_friends.sql first.");
-      showMessage("Friend request failed", message);
-    } finally {
-      setFriendActionStatus("idle");
-    }
-  }
-
-  async function respondToFriendRequest(requestId: string, response: "accept" | "decline") {
-    if (!session || friendActionStatus === "saving") return;
-
-    setFriendActionStatus("saving");
-    try {
-      if (response === "accept") {
-        await acceptFriendRequest(requestId, session.user.id);
-      } else {
-        await declineFriendRequest(requestId, session.user.id);
-      }
-      await loadFriendsData(session.user.id);
-      if (selectedPublicProfile) {
-        const nextState = await fetchFriendState(session.user.id, selectedPublicProfile.id);
-        setFriendStatus(nextState.status);
-        setSelectedFriendRequestId(nextState.requestId);
-      }
-    } catch (error) {
-      const message = describeSupabaseError(error, "Could not update friend request.");
-      showMessage("Friend request failed", message);
-    } finally {
-      setFriendActionStatus("idle");
-    }
-  }
-
-  async function runUnfriend() {
-    if (!session || !selectedPublicProfile || friendActionStatus === "saving") return;
-
-    setFriendActionStatus("saving");
-    try {
-      await removeFriend(session.user.id, selectedPublicProfile.id);
-      setFriendStatus("none");
-      setSelectedFriendRequestId(null);
-      setFriends((current) => current.filter((friend) => friend.id !== selectedPublicProfile.id));
-      await loadFriendsData(session.user.id);
-    } catch (error) {
-      const message = describeSupabaseError(error, "Could not remove friend.");
-      showMessage("Unfriend failed", message);
-    } finally {
-      setFriendActionStatus("idle");
-    }
-  }
-
-  async function runCancelFriendRequest() {
-    if (!session || !selectedFriendRequestId || friendActionStatus === "saving") return;
-
-    setFriendActionStatus("saving");
-    try {
-      await cancelFriendRequest(selectedFriendRequestId, session.user.id);
-      setFriendStatus("none");
-      setSelectedFriendRequestId(null);
-      await loadFriendsData(session.user.id);
-    } catch (error) {
-      const message = describeSupabaseError(error, "Could not cancel friend request.");
-      showMessage("Cancel request failed", message);
-    } finally {
-      setFriendActionStatus("idle");
-    }
-  }
-
-  function confirmUnfriend() {
-    if (!selectedPublicProfile) return;
-
-    confirmAction({
-      title: "Remove friend?",
-      message: `Remove ${selectedPublicProfile.username} as a friend?`,
-      cancelText: "Keep friend",
-      confirmText: "Unfriend",
-      destructive: true,
-      onConfirm: runUnfriend
-    });
-  }
-
-  async function inviteFriendToPlan(friend: Profile) {
-    if (!session || !selectedPlan || invitingFriendId) return;
-
-    setInvitingFriendId(friend.id);
-    try {
-      await notifyPlanInvite(
-        selectedPlan.id,
-        session.user.id,
-        friend.id,
-        `${username} invited you to ${selectedChallenge.name}`,
-        `${selectedPlan.place} - ${selectedPlan.startsAt}`
-      );
-      showMessage("Invite sent", `Invited ${friend.username}.`, `Invited ${friend.username}.`);
-    } catch (error) {
-      const message = describeSupabaseError(error, "Could not send invite. Run supabase/add_chat_dm_notifications.sql.");
-      showMessage("Invite failed", message);
-    } finally {
-      setInvitingFriendId("");
-    }
-  }
 
   useEffect(() => {
     let alive = true;
@@ -702,6 +586,29 @@ export default function App() {
     setScreen,
     setXp,
     xp
+  });
+
+  const {
+    confirmUnfriend,
+    inviteFriendToPlan,
+    requestFriendship,
+    respondToFriendRequest,
+    runCancelFriendRequest
+  } = createFriendActions({
+    friendActionStatus,
+    invitingFriendId,
+    loadFriendsData,
+    selectedChallengeName: selectedChallenge.name,
+    selectedFriendRequestId,
+    selectedPlan,
+    selectedPublicProfile,
+    sessionUserId: session?.user.id,
+    setFriendActionStatus,
+    setFriends,
+    setFriendStatus,
+    setInvitingFriendId,
+    setSelectedFriendRequestId,
+    username
   });
 
   async function openNotifications() {
