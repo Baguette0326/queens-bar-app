@@ -21,16 +21,17 @@ import type { Session } from "@supabase/supabase-js";
 import { AvatarId, BrowseCategory, Challenge, ChallengeCollection, ChallengeTone, challenges, getBrowseCategories } from "./src/data/catalog";
 import { fetchCatalogBars } from "./src/data/catalogRepository";
 import { RemoteChatMessage, sendChatMessage } from "./src/data/chatRepository";
-import { fetchCompletedBarIds, removeCompletedBar, selfCompleteBar } from "./src/data/completionRepository";
+import { fetchCompletedBarIds } from "./src/data/completionRepository";
 import { RemoteDmMessage, RemoteDmThread } from "./src/data/dmRepository";
 import { acceptFriendRequest, cancelFriendRequest, declineFriendRequest, fetchFriends, fetchFriendState, fetchIncomingFriendRequests, FriendRequest, FriendStatus, removeFriend, sendFriendRequest } from "./src/data/friendRepository";
-import { fetchPinnedBarIds, pinBar, unpinBar } from "./src/data/interestRepository";
+import { fetchPinnedBarIds } from "./src/data/interestRepository";
 import { markNotificationRead, notifyFriendRequest, notifyPlanAttendees, notifyPlanCanceled, notifyPlanInvite, PlanNotification } from "./src/data/notificationRepository";
 import { fetchLeaderboard, searchProfiles } from "./src/data/peopleRepository";
 import { cancelPlan as cancelRemotePlan, createPlan as createRemotePlan, fetchPlans, joinPlan as joinRemotePlan, leavePlan as leaveRemotePlan, RemotePlan } from "./src/data/planRepository";
-import { createProfile, fetchProfile, getRankFromXp, Profile, roleDbToLabel, updateProfileDetails, updateProfileXp } from "./src/data/profileRepository";
+import { createProfile, fetchProfile, getRankFromXp, Profile, roleDbToLabel, updateProfileDetails } from "./src/data/profileRepository";
 import { describeSupabaseError } from "./src/data/supabaseError";
 import { supabase } from "./src/lib/supabase";
+import { createBarActions } from "./src/app/barActions";
 import { createChatActions } from "./src/app/chatActions";
 import { confirmAction, showMessage } from "./src/app/dialogs";
 import { avatarOptions, startingPlans } from "./src/app/demoData";
@@ -682,6 +683,27 @@ export default function App() {
     username
   });
 
+  const {
+    completeSelectedChallenge,
+    toggleInterest,
+    undoSelectedChallengeCompletion
+  } = createBarActions({
+    completedBarIds,
+    completionStatus,
+    pinnedBarIds,
+    selectedChallenge,
+    selectedChallengeCompleted,
+    sessionUserId: session?.user.id,
+    setCompletedBarIds,
+    setCompletionStatus,
+    setInterestStatus,
+    setPinnedBarIds,
+    setProfile,
+    setScreen,
+    setXp,
+    xp
+  });
+
   async function openNotifications() {
     if (session) await loadNotifications(session.user.id);
     go("notifications");
@@ -732,105 +754,6 @@ export default function App() {
     }
 
     showMessage("Plan unavailable", "That plan is no longer active.", "That plan is no longer active.");
-  }
-
-  async function toggleInterest() {
-    if (!session) {
-      go("login");
-      return;
-    }
-
-    const barId = selectedChallenge.id;
-    const pinned = pinnedBarIds.includes(barId);
-    const nextPinnedIds = pinned ? pinnedBarIds.filter((id) => id !== barId) : [...pinnedBarIds, barId];
-    setPinnedBarIds(nextPinnedIds);
-    setInterestStatus("saving");
-
-    try {
-      if (pinned) {
-        await unpinBar(session.user.id, barId);
-      } else {
-        await pinBar(session.user.id, barId);
-      }
-    } catch (error) {
-      setPinnedBarIds(pinnedBarIds);
-      const message = describeSupabaseError(error, "Could not update interest.");
-      showMessage("Interest failed", message);
-    } finally {
-      setInterestStatus("idle");
-    }
-  }
-
-  async function completeSelectedChallenge() {
-    if (!session) {
-      go("login");
-      return;
-    }
-
-    if (selectedChallengeCompleted) {
-      undoSelectedChallengeCompletion();
-      return;
-    }
-
-    if (completionStatus === "saving") return;
-
-    const nextCompletedIds = [...completedBarIds, selectedChallenge.id];
-    const nextXp = xp + selectedChallenge.xp;
-    setCompletedBarIds(nextCompletedIds);
-    setXp(nextXp);
-    setCompletionStatus("saving");
-
-    try {
-      await selfCompleteBar(session.user.id, selectedChallenge.id, selectedChallenge.xp);
-      const updatedProfile = await updateProfileXp(session.user.id, nextXp);
-      setProfile(updatedProfile);
-      setXp(updatedProfile.xp);
-    } catch (error) {
-      setCompletedBarIds(completedBarIds);
-      setXp(xp);
-      const message = describeSupabaseError(error, "Could not mark bar completed.");
-      showMessage("Completion failed", message);
-    } finally {
-      setCompletionStatus("idle");
-    }
-  }
-
-  async function runUndoSelectedChallengeCompletion() {
-    if (!session || completionStatus === "saving") return;
-
-    const nextCompletedIds = completedBarIds.filter((id) => id !== selectedChallenge.id);
-    const nextXp = Math.max(0, xp - selectedChallenge.xp);
-    setCompletedBarIds(nextCompletedIds);
-    setXp(nextXp);
-    setCompletionStatus("saving");
-
-    try {
-      await removeCompletedBar(session.user.id, selectedChallenge.id);
-      const updatedProfile = await updateProfileXp(session.user.id, nextXp);
-      setProfile(updatedProfile);
-      setXp(updatedProfile.xp);
-    } catch (error) {
-      setCompletedBarIds(completedBarIds);
-      setXp(xp);
-      const message = describeSupabaseError(error, "Could not undo completion.");
-      showMessage("Undo failed", message);
-    } finally {
-      setCompletionStatus("idle");
-    }
-  }
-
-  function undoSelectedChallengeCompletion() {
-    if (!session || completionStatus === "saving") return;
-
-    confirmAction({
-      title: "Undo completion?",
-      message: "This will remove the bar from your completed list.",
-      webMessage: `Undo completion for ${selectedChallenge.name}?`,
-      cancelText: "Keep completed",
-      confirmText: "Undo",
-      destructive: true,
-      onConfirm: runUndoSelectedChallengeCompletion
-    });
   }
 
   async function runJoinPlan() {
