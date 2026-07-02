@@ -20,17 +20,18 @@ import {
 import type { Session } from "@supabase/supabase-js";
 import { AvatarId, BrowseCategory, Challenge, ChallengeCollection, ChallengeTone, challenges, getBrowseCategories } from "./src/data/catalog";
 import { fetchCatalogBars } from "./src/data/catalogRepository";
-import { fetchChatMessages, RemoteChatMessage, sendChatMessage } from "./src/data/chatRepository";
+import { RemoteChatMessage, sendChatMessage } from "./src/data/chatRepository";
 import { fetchCompletedBarIds, removeCompletedBar, selfCompleteBar } from "./src/data/completionRepository";
-import { fetchDmMessages, fetchDmThreads, getOrCreateDmThread, RemoteDmMessage, RemoteDmThread, sendDmMessage } from "./src/data/dmRepository";
+import { RemoteDmMessage, RemoteDmThread } from "./src/data/dmRepository";
 import { acceptFriendRequest, cancelFriendRequest, declineFriendRequest, fetchFriends, fetchFriendState, fetchIncomingFriendRequests, FriendRequest, FriendStatus, removeFriend, sendFriendRequest } from "./src/data/friendRepository";
 import { fetchPinnedBarIds, pinBar, unpinBar } from "./src/data/interestRepository";
-import { fetchNotifications, markNotificationRead, notifyDmRecipient, notifyFriendRequest, notifyPlanAttendees, notifyPlanCanceled, notifyPlanInvite, PlanNotification } from "./src/data/notificationRepository";
+import { markNotificationRead, notifyFriendRequest, notifyPlanAttendees, notifyPlanCanceled, notifyPlanInvite, PlanNotification } from "./src/data/notificationRepository";
 import { fetchLeaderboard, searchProfiles } from "./src/data/peopleRepository";
 import { cancelPlan as cancelRemotePlan, createPlan as createRemotePlan, fetchPlans, joinPlan as joinRemotePlan, leavePlan as leaveRemotePlan, RemotePlan } from "./src/data/planRepository";
 import { createProfile, fetchProfile, getRankFromXp, Profile, roleDbToLabel, updateProfileDetails, updateProfileXp } from "./src/data/profileRepository";
 import { describeSupabaseError } from "./src/data/supabaseError";
 import { supabase } from "./src/lib/supabase";
+import { createChatActions } from "./src/app/chatActions";
 import { confirmAction, showMessage } from "./src/app/dialogs";
 import { avatarOptions, startingPlans } from "./src/app/demoData";
 import { readStoredScreen, writeStoredScreen } from "./src/app/navigation";
@@ -650,6 +651,37 @@ export default function App() {
     go("plan");
   }
 
+  const {
+    loadDmThreads,
+    openChat,
+    openDmThread,
+    refreshChat,
+    refreshDm,
+    sendDirectMessage,
+    sendMessage,
+    startDm
+  } = createChatActions({
+    chatStatus,
+    dmMessage,
+    dmStatus,
+    message,
+    selectedChallengeName: selectedChallenge.name,
+    selectedDmThreadId,
+    selectedPlan,
+    sessionUserId: session?.user.id,
+    setChatMembersOpen,
+    setChatStatus,
+    setDmMessage,
+    setDmMessages,
+    setDmStatus,
+    setDmThreads,
+    setMessage,
+    setMessages,
+    setScreen,
+    setSelectedDmThreadId,
+    username
+  });
+
   async function openNotifications() {
     if (session) await loadNotifications(session.user.id);
     go("notifications");
@@ -700,77 +732,6 @@ export default function App() {
     }
 
     showMessage("Plan unavailable", "That plan is no longer active.", "That plan is no longer active.");
-  }
-
-  async function openChat(planId = selectedPlan?.id) {
-    if (!planId) return;
-
-    setChatStatus("loading");
-    setChatMembersOpen(false);
-    try {
-      await refreshChat(planId);
-      setChatStatus("idle");
-    } catch (error) {
-      console.warn("Failed to load chat.", error);
-      setMessages([]);
-      setChatStatus("error");
-    }
-    go("chat");
-  }
-
-  async function refreshChat(planId = selectedPlan?.id) {
-    if (!planId) return;
-
-    const remoteMessages = await fetchChatMessages(planId);
-    setMessages(remoteMessages);
-  }
-
-  async function loadDmThreads() {
-    if (!session) return [];
-    const threads = await fetchDmThreads(session.user.id);
-    setDmThreads(threads);
-    return threads;
-  }
-
-  async function openDmThread(threadId: string) {
-    setSelectedDmThreadId(threadId);
-    setDmStatus("loading");
-    try {
-      const remoteMessages = await fetchDmMessages(threadId);
-      setDmMessages(remoteMessages);
-      setDmStatus("idle");
-      go("dmThread");
-    } catch (error) {
-      console.warn("Failed to load DM.", error);
-      setDmMessages([]);
-      setDmStatus("error");
-      go("dmThread");
-    }
-  }
-
-  async function startDm(otherUserId: string) {
-    if (!session) {
-      go("login");
-      return;
-    }
-
-    try {
-      const threadId = await getOrCreateDmThread(otherUserId);
-      const threads = await loadDmThreads();
-      if (!threads.some((thread) => thread.id === threadId)) {
-        setDmThreads(await fetchDmThreads(session.user.id));
-      }
-      await openDmThread(threadId);
-    } catch (error) {
-      const message = describeSupabaseError(error, "Could not start DM. Run supabase/add_dms.sql first.");
-      showMessage("DM failed", message);
-    }
-  }
-
-  async function refreshDm(threadId = selectedDmThreadId) {
-    if (!threadId) return;
-    const remoteMessages = await fetchDmMessages(threadId);
-    setDmMessages(remoteMessages);
   }
 
   async function toggleInterest() {
@@ -1109,66 +1070,6 @@ export default function App() {
       destructive: true,
       onConfirm: runCancelPlan
     });
-  }
-
-  async function sendMessage() {
-    if (!session) {
-      go("login");
-      return;
-    }
-
-    const body = message.trim();
-    if (!body || chatStatus === "sending") return;
-
-    setMessage("");
-    setChatStatus("sending");
-    try {
-      const sentMessage = await sendChatMessage(selectedPlan.id, session.user.id, body);
-      setMessages((current) => [...current, sentMessage]);
-      notifyPlanAttendees(
-        selectedPlan.id,
-        session.user.id,
-        "group_message",
-        `${username} messaged ${selectedChallenge.name}`,
-        body.length > 120 ? `${body.slice(0, 117)}...` : body
-      ).catch((error) => console.warn("Failed to notify plan attendees.", error));
-      setChatStatus("idle");
-    } catch (error) {
-      setMessage(body);
-      setChatStatus("error");
-      const errorMessage = describeSupabaseError(error, "Could not send message.");
-      showMessage("Message failed", errorMessage);
-    }
-  }
-
-  async function sendDirectMessage() {
-    if (!session || !selectedDmThreadId) {
-      go("login");
-      return;
-    }
-
-    const body = dmMessage.trim();
-    if (!body || dmStatus === "sending") return;
-
-    setDmStatus("sending");
-    setDmMessage("");
-    try {
-      const sentMessage = await sendDmMessage(selectedDmThreadId, session.user.id, body);
-      setDmMessages((current) => [...current, sentMessage]);
-      notifyDmRecipient(
-        selectedDmThreadId,
-        session.user.id,
-        `${username} sent you a DM`,
-        body.length > 120 ? `${body.slice(0, 117)}...` : body
-      ).catch((error) => console.warn("Failed to notify DM recipient.", error));
-      loadDmThreads().catch((error) => console.warn("Failed to refresh DM inbox.", error));
-      setDmStatus("idle");
-    } catch (error) {
-      setDmMessage(body);
-      setDmStatus("error");
-      const errorMessage = describeSupabaseError(error, "Could not send DM.");
-      showMessage("DM failed", errorMessage);
-    }
   }
 
   const showTabs = !["login", "onboarding", "challenge", "plan", "create", "notifications", "completed", "people", "publicProfile", "leaderboard"].includes(screen);
