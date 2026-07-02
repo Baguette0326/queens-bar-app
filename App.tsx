@@ -36,6 +36,7 @@ import { avatarOptions, startingPlans } from "./src/app/demoData";
 import { readStoredScreen, writeStoredScreen } from "./src/app/navigation";
 import { buildCreatePlanSchedule, formatCreatedPlanTime, formatCreateTime, parseCreateTime, sameMinute } from "./src/app/planSchedule";
 import { getPatchProgress, getRankProgress, getUsernameCooldown } from "./src/app/profileProgress";
+import { createRemoteLoaders } from "./src/app/remoteLoaders";
 import type { CreatePlanDay, Plan, Screen } from "./src/app/types";
 import { AvatarIcon } from "./src/ui/AvatarIcon";
 import { BottomTabs } from "./src/ui/BottomTabs";
@@ -125,107 +126,36 @@ export default function App() {
   const [leaderboardStatus, setLeaderboardStatus] = useState<"idle" | "loading" | "error">("idle");
   const [profileSaveStatus, setProfileSaveStatus] = useState<"idle" | "saving">("idle");
 
-  async function loadRemotePlans(userId?: string, preferredPlanId?: string) {
-    setPlansStatus("loading");
-    try {
-      const remotePlans = await fetchPlans(userId);
-      if (remotePlans.length > 0) {
-        setPlans(remotePlans);
-        setPlansStatus("remote");
-        if (preferredPlanId && remotePlans.some((plan) => plan.id === preferredPlanId)) {
-          setSelectedPlanId(preferredPlanId);
-        } else if (!remotePlans.some((plan) => plan.id === selectedPlanId)) {
-          setSelectedPlanId(remotePlans[0].id);
-        }
-      } else {
-        setPlans([]);
-        setSelectedPlanId("");
-        setPlansStatus("remote");
-      }
-      return remotePlans;
-    } catch (error) {
-      console.warn("Failed to load Supabase plans. Using local fallback.", error);
-      setPlansStatus("error");
-      return null;
-    }
-  }
-
-  async function loadNotifications(userId: string) {
-    setNotificationsStatus("loading");
-    try {
-      const nextNotifications = await fetchNotifications(userId);
-      setNotifications(nextNotifications);
-      setNotificationsStatus("idle");
-      return nextNotifications;
-    } catch (error) {
-      console.warn("Failed to load notifications.", error);
-      setNotificationsStatus("error");
-      return null;
-    }
-  }
-
-  async function loadPeople(nextQuery = peopleQuery) {
-    setPeopleStatus("loading");
-    try {
-      const results = await searchProfiles(nextQuery, session?.user.id);
-      setPeopleResults(results);
-      setPeopleStatus("idle");
-      return results;
-    } catch (error) {
-      console.warn("Failed to search profiles.", error);
-      setPeopleStatus("error");
-      return [];
-    }
-  }
-
-  async function loadFriendsData(userId = session?.user.id) {
-    if (!userId) return;
-    const [requests, nextFriends] = await Promise.all([
-      fetchIncomingFriendRequests(userId),
-      fetchFriends(userId)
-    ]);
-    setIncomingFriendRequests(requests);
-    setFriends(nextFriends);
-  }
-
-  async function loadLeaderboard() {
-    setLeaderboardStatus("loading");
-    try {
-      const results = await fetchLeaderboard();
-      setLeaderboard(results);
-      setLeaderboardStatus("idle");
-      return results;
-    } catch (error) {
-      console.warn("Failed to load leaderboard.", error);
-      setLeaderboardStatus("error");
-      return [];
-    }
-  }
-
-  async function openPublicProfile(nextProfile: Profile, backScreen: Screen = "people") {
-    setSelectedPublicProfile(nextProfile);
-    setPublicProfileBackScreen(backScreen);
-    setPublicCompletedBarIds([]);
-    setFriendStatus("none");
-    setSelectedFriendRequestId(null);
-    setScreen("publicProfile");
-    try {
-      const [ids, nextFriendState] = await Promise.all([
-        fetchCompletedBarIds(nextProfile.id),
-        session && session.user.id !== nextProfile.id ? fetchFriendState(session.user.id, nextProfile.id) : Promise.resolve({ status: "none" as FriendStatus, requestId: null })
-      ]);
-      setPublicCompletedBarIds(ids);
-      setFriendStatus(nextFriendState.status);
-      setSelectedFriendRequestId(nextFriendState.requestId);
-    } catch (error) {
-      console.warn("Failed to load public completions.", error);
-    }
-  }
-
-  async function openPublicProfileById(userId: string, backScreen: Screen = "chat") {
-    const nextProfile = await fetchProfile(userId);
-    if (nextProfile) openPublicProfile(nextProfile, backScreen);
-  }
+  const {
+    loadFriendsData,
+    loadLeaderboard,
+    loadNotifications,
+    loadPeople,
+    loadRemotePlans,
+    openPublicProfile,
+    openPublicProfileById
+  } = createRemoteLoaders({
+    peopleQuery,
+    sessionUserId: session?.user.id,
+    selectedPlanId,
+    setFriendStatus,
+    setFriends,
+    setIncomingFriendRequests,
+    setLeaderboard,
+    setLeaderboardStatus,
+    setNotifications,
+    setNotificationsStatus,
+    setPeopleResults,
+    setPeopleStatus,
+    setPlans,
+    setPlansStatus,
+    setPublicCompletedBarIds,
+    setPublicProfileBackScreen,
+    setScreen,
+    setSelectedFriendRequestId,
+    setSelectedPlanId,
+    setSelectedPublicProfile
+  });
 
   async function requestFriendship() {
     if (!session || !selectedPublicProfile || friendActionStatus === "saving") return;
