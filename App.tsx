@@ -1,6 +1,5 @@
 ﻿import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Alert,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -9,8 +8,7 @@ import {
   Text,
   TextInput,
   View,
-  Linking,
-  Platform
+  Linking
 } from "react-native";
 import {
   Check,
@@ -33,6 +31,7 @@ import { cancelPlan as cancelRemotePlan, createPlan as createRemotePlan, fetchPl
 import { createProfile, fetchProfile, getRankFromXp, Profile, roleDbToLabel, updateProfileDetails, updateProfileXp } from "./src/data/profileRepository";
 import { describeSupabaseError } from "./src/data/supabaseError";
 import { supabase } from "./src/lib/supabase";
+import { confirmAction, showMessage } from "./src/app/dialogs";
 import { avatarOptions, startingPlans } from "./src/app/demoData";
 import { readStoredScreen, writeStoredScreen } from "./src/app/navigation";
 import { buildCreatePlanSchedule, formatCreatedPlanTime, formatCreateTime, parseCreateTime, sameMinute } from "./src/app/planSchedule";
@@ -246,11 +245,7 @@ export default function App() {
       setSelectedFriendRequestId(nextState.requestId);
     } catch (error) {
       const message = describeSupabaseError(error, "Could not send friend request. Run supabase/add_friends.sql first.");
-      if (Platform.OS === "web") {
-        window.alert(`Friend request failed: ${message}`);
-      } else {
-        Alert.alert("Friend request failed", message);
-      }
+      showMessage("Friend request failed", message);
     } finally {
       setFriendActionStatus("idle");
     }
@@ -274,11 +269,7 @@ export default function App() {
       }
     } catch (error) {
       const message = describeSupabaseError(error, "Could not update friend request.");
-      if (Platform.OS === "web") {
-        window.alert(`Friend request failed: ${message}`);
-      } else {
-        Alert.alert("Friend request failed", message);
-      }
+      showMessage("Friend request failed", message);
     } finally {
       setFriendActionStatus("idle");
     }
@@ -296,11 +287,7 @@ export default function App() {
       await loadFriendsData(session.user.id);
     } catch (error) {
       const message = describeSupabaseError(error, "Could not remove friend.");
-      if (Platform.OS === "web") {
-        window.alert(`Unfriend failed: ${message}`);
-      } else {
-        Alert.alert("Unfriend failed", message);
-      }
+      showMessage("Unfriend failed", message);
     } finally {
       setFriendActionStatus("idle");
     }
@@ -317,11 +304,7 @@ export default function App() {
       await loadFriendsData(session.user.id);
     } catch (error) {
       const message = describeSupabaseError(error, "Could not cancel friend request.");
-      if (Platform.OS === "web") {
-        window.alert(`Cancel request failed: ${message}`);
-      } else {
-        Alert.alert("Cancel request failed", message);
-      }
+      showMessage("Cancel request failed", message);
     } finally {
       setFriendActionStatus("idle");
     }
@@ -330,20 +313,14 @@ export default function App() {
   function confirmUnfriend() {
     if (!selectedPublicProfile) return;
 
-    if (Platform.OS === "web") {
-      const confirmed = window.confirm(`Remove ${selectedPublicProfile.username} as a friend?`);
-      if (confirmed) runUnfriend();
-      return;
-    }
-
-    Alert.alert(
-      "Remove friend?",
-      `Remove ${selectedPublicProfile.username} as a friend?`,
-      [
-        { text: "Keep friend", style: "cancel" },
-        { text: "Unfriend", style: "destructive", onPress: runUnfriend }
-      ]
-    );
+    confirmAction({
+      title: "Remove friend?",
+      message: `Remove ${selectedPublicProfile.username} as a friend?`,
+      cancelText: "Keep friend",
+      confirmText: "Unfriend",
+      destructive: true,
+      onConfirm: runUnfriend
+    });
   }
 
   async function inviteFriendToPlan(friend: Profile) {
@@ -358,18 +335,10 @@ export default function App() {
         `${username} invited you to ${selectedChallenge.name}`,
         `${selectedPlan.place} - ${selectedPlan.startsAt}`
       );
-      if (Platform.OS === "web") {
-        window.alert(`Invited ${friend.username}.`);
-      } else {
-        Alert.alert("Invite sent", `Invited ${friend.username}.`);
-      }
+      showMessage("Invite sent", `Invited ${friend.username}.`, `Invited ${friend.username}.`);
     } catch (error) {
       const message = describeSupabaseError(error, "Could not send invite. Run supabase/add_chat_dm_notifications.sql.");
-      if (Platform.OS === "web") {
-        window.alert(`Invite failed: ${message}`);
-      } else {
-        Alert.alert("Invite failed", message);
-      }
+      showMessage("Invite failed", message);
     } finally {
       setInvitingFriendId("");
     }
@@ -583,7 +552,7 @@ export default function App() {
 
     const trimmedUsername = username.trim();
     if (!trimmedUsername) {
-      Alert.alert("Username required", "Pick a unique username before continuing.");
+      showMessage("Username required", "Pick a unique username before continuing.");
       return;
     }
 
@@ -602,7 +571,7 @@ export default function App() {
       setScreen("discover");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Could not save profile.";
-      Alert.alert("Profile not saved", message);
+      showMessage("Profile not saved", message);
     } finally {
       setAuthStatus("ready");
     }
@@ -616,12 +585,12 @@ export default function App() {
     const usernameChanged = Boolean(profile && trimmedUsername !== profile.username);
 
     if (trimmedUsername.length < 3) {
-      Alert.alert("Profile not saved", "Display name must be at least 3 characters.");
+      showMessage("Profile not saved", "Display name must be at least 3 characters.");
       return;
     }
 
     if (usernameChanged && !usernameCooldown.canChange) {
-      Alert.alert("Profile not saved", `You can change your display name again in ${usernameCooldown.daysLeft} day${usernameCooldown.daysLeft === 1 ? "" : "s"}.`);
+      showMessage("Profile not saved", `You can change your display name again in ${usernameCooldown.daysLeft} day${usernameCooldown.daysLeft === 1 ? "" : "s"}.`);
       return;
     }
 
@@ -640,18 +609,12 @@ export default function App() {
       setAvatar(savedProfile.avatar);
       if (savedProfile.bio !== null || !draftBio.trim()) {
         setDraftBio(savedProfile.bio ?? "");
-      } else if (Platform.OS === "web") {
-        window.alert("Avatar saved. Run supabase/add_profile_bio.sql to enable bio saving.");
       } else {
-        Alert.alert("Avatar saved", "Run supabase/add_profile_bio.sql to enable bio saving.");
+        showMessage("Avatar saved", "Run supabase/add_profile_bio.sql to enable bio saving.", "Avatar saved. Run supabase/add_profile_bio.sql to enable bio saving.");
       }
     } catch (error) {
       const message = describeSupabaseError(error, "Could not save profile.");
-      if (Platform.OS === "web") {
-        window.alert(`Profile failed: ${message}`);
-      } else {
-        Alert.alert("Profile failed", message);
-      }
+      showMessage("Profile failed", message);
     } finally {
       setProfileSaveStatus("idle");
     }
@@ -806,11 +769,7 @@ export default function App() {
       return;
     }
 
-    if (Platform.OS === "web") {
-      window.alert("That plan is no longer active.");
-    } else {
-      Alert.alert("Plan unavailable", "That plan is no longer active.");
-    }
+    showMessage("Plan unavailable", "That plan is no longer active.", "That plan is no longer active.");
   }
 
   async function openChat(planId = selectedPlan?.id) {
@@ -874,11 +833,7 @@ export default function App() {
       await openDmThread(threadId);
     } catch (error) {
       const message = describeSupabaseError(error, "Could not start DM. Run supabase/add_dms.sql first.");
-      if (Platform.OS === "web") {
-        window.alert(`DM failed: ${message}`);
-      } else {
-        Alert.alert("DM failed", message);
-      }
+      showMessage("DM failed", message);
     }
   }
 
@@ -909,11 +864,7 @@ export default function App() {
     } catch (error) {
       setPinnedBarIds(pinnedBarIds);
       const message = describeSupabaseError(error, "Could not update interest.");
-      if (Platform.OS === "web") {
-        window.alert(`Interest failed: ${message}`);
-      } else {
-        Alert.alert("Interest failed", message);
-      }
+      showMessage("Interest failed", message);
     } finally {
       setInterestStatus("idle");
     }
@@ -947,11 +898,7 @@ export default function App() {
       setCompletedBarIds(completedBarIds);
       setXp(xp);
       const message = describeSupabaseError(error, "Could not mark bar completed.");
-      if (Platform.OS === "web") {
-        window.alert(`Completion failed: ${message}`);
-      } else {
-        Alert.alert("Completion failed", message);
-      }
+      showMessage("Completion failed", message);
     } finally {
       setCompletionStatus("idle");
     }
@@ -975,11 +922,7 @@ export default function App() {
       setCompletedBarIds(completedBarIds);
       setXp(xp);
       const message = describeSupabaseError(error, "Could not undo completion.");
-      if (Platform.OS === "web") {
-        window.alert(`Undo failed: ${message}`);
-      } else {
-        Alert.alert("Undo failed", message);
-      }
+      showMessage("Undo failed", message);
     } finally {
       setCompletionStatus("idle");
     }
@@ -988,20 +931,15 @@ export default function App() {
   function undoSelectedChallengeCompletion() {
     if (!session || completionStatus === "saving") return;
 
-    if (Platform.OS === "web") {
-      const confirmed = window.confirm(`Undo completion for ${selectedChallenge.name}?`);
-      if (confirmed) runUndoSelectedChallengeCompletion();
-      return;
-    }
-
-    Alert.alert(
-      "Undo completion?",
-      "This will remove the bar from your completed list.",
-      [
-        { text: "Keep completed", style: "cancel" },
-        { text: "Undo", style: "destructive", onPress: runUndoSelectedChallengeCompletion }
-      ]
-    );
+    confirmAction({
+      title: "Undo completion?",
+      message: "This will remove the bar from your completed list.",
+      webMessage: `Undo completion for ${selectedChallenge.name}?`,
+      cancelText: "Keep completed",
+      confirmText: "Undo",
+      destructive: true,
+      onConfirm: runUndoSelectedChallengeCompletion
+    });
   }
 
   async function runJoinPlan() {
@@ -1026,7 +964,7 @@ export default function App() {
       await openChat(selectedPlan.id);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Could not join plan.";
-      Alert.alert("Join failed", message);
+      showMessage("Join failed", message);
     }
   }
 
@@ -1061,31 +999,22 @@ export default function App() {
       }
     } catch (error) {
       const message = describeSupabaseError(error, "Could not leave plan. You may need to run supabase/add_leave_plan.sql.");
-      if (Platform.OS === "web") {
-        window.alert(`Leave failed: ${message}`);
-      } else {
-        Alert.alert("Leave failed", message);
-      }
+      showMessage("Leave failed", message);
     }
   }
 
   function confirmLeavePlan() {
     if (!session || !selectedPlan) return;
 
-    if (Platform.OS === "web") {
-      const confirmed = window.confirm("Leave this group chat? You can join the plan again later if it is still open.");
-      if (confirmed) runLeavePlan();
-      return;
-    }
-
-    Alert.alert(
-      "Leave group?",
-      "You will be removed from the attendee list and group chat.",
-      [
-        { text: "Stay", style: "cancel" },
-        { text: "Leave", style: "destructive", onPress: runLeavePlan }
-      ]
-    );
+    confirmAction({
+      title: "Leave group?",
+      message: "You will be removed from the attendee list and group chat.",
+      webMessage: "Leave this group chat? You can join the plan again later if it is still open.",
+      cancelText: "Stay",
+      confirmText: "Leave",
+      destructive: true,
+      onConfirm: runLeavePlan
+    });
   }
 
   function confirmJoinPlan() {
@@ -1096,20 +1025,13 @@ export default function App() {
 
     const message = `${selectedChallenge.name}\n${selectedPlan.place} Â· ${selectedPlan.startsAt}\n\nJoin this plan so the organizer can see you are coming?`;
 
-    if (Platform.OS === "web") {
-      const confirmed = window.confirm(message);
-      if (confirmed) runJoinPlan();
-      return;
-    }
-
-    Alert.alert(
-      "Join this plan?",
+    confirmAction({
+      title: "Join this plan?",
       message,
-      [
-        { text: "Not yet", style: "cancel" },
-        { text: "Confirm join", onPress: runJoinPlan }
-      ]
-    );
+      cancelText: "Not yet",
+      confirmText: "Confirm join",
+      onConfirm: runJoinPlan
+    });
   }
 
   async function createPlan() {
@@ -1132,7 +1054,7 @@ export default function App() {
       } else {
         const message = "Enter a future time like 7:00 PM, 7 PM, or 19:00.";
         setPlanCreateMessage(message);
-        Alert.alert("Check the time", message);
+        showMessage("Check the time", message);
         return;
       }
     }
@@ -1151,22 +1073,14 @@ export default function App() {
     );
 
     if (duplicatePlan) {
-      if (Platform.OS === "web") {
-        const openExisting = window.confirm(
-          "There is already a plan for this bar at that exact time and place. Open that plan instead?"
-        );
-        if (openExisting) openPlan(duplicatePlan.id);
-        return;
-      }
-
-      Alert.alert(
-        "Plan already exists",
-        "There is already a plan for this bar at that exact time and place. Open that plan instead, or choose a different time/place once those controls are editable.",
-        [
-          { text: "Keep editing", style: "cancel" },
-          { text: "Open plan", onPress: () => openPlan(duplicatePlan.id) }
-        ]
-      );
+      confirmAction({
+        title: "Plan already exists",
+        message: "There is already a plan for this bar at that exact time and place. Open that plan instead, or choose a different time/place once those controls are editable.",
+        webMessage: "There is already a plan for this bar at that exact time and place. Open that plan instead?",
+        cancelText: "Keep editing",
+        confirmText: "Open plan",
+        onConfirm: () => openPlan(duplicatePlan.id)
+      });
       return;
     }
 
@@ -1214,7 +1128,7 @@ export default function App() {
     } catch (error) {
       const message = error instanceof Error ? error.message : "Could not create plan.";
       setPlanCreateMessage(message);
-      Alert.alert("Plan not created", message);
+      showMessage("Plan not created", message);
     } finally {
       setPublishingPlan(false);
     }
@@ -1225,11 +1139,7 @@ export default function App() {
 
     if (!canCurrentUserCancelPlan) {
       const message = "You can only cancel a plan before anyone else joins. Ask attendees to leave first, or keep the plan active.";
-      if (Platform.OS === "web") {
-        window.alert(message);
-      } else {
-        Alert.alert("Plan has attendees", message);
-      }
+      showMessage("Plan has attendees", message, message);
       return;
     }
 
@@ -1256,32 +1166,19 @@ export default function App() {
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Could not cancel plan.";
-        if (Platform.OS === "web") {
-          window.alert(`Cancel failed: ${message}`);
-        } else {
-          Alert.alert("Cancel failed", message);
-        }
+        showMessage("Cancel failed", message);
       }
     }
 
-    if (Platform.OS === "web") {
-      const confirmed = window.confirm("Cancel this plan? It will disappear from discovery and stop new people from joining.");
-      if (confirmed) await runCancelPlan();
-      return;
-    }
-
-    Alert.alert(
-      "Cancel this plan?",
-      "This removes it from discovery and stops new people from joining.",
-      [
-        { text: "Keep plan", style: "cancel" },
-        {
-          text: "Cancel plan",
-          style: "destructive",
-          onPress: runCancelPlan
-        }
-      ]
-    );
+    confirmAction({
+      title: "Cancel this plan?",
+      message: "This removes it from discovery and stops new people from joining.",
+      webMessage: "Cancel this plan? It will disappear from discovery and stop new people from joining.",
+      cancelText: "Keep plan",
+      confirmText: "Cancel plan",
+      destructive: true,
+      onConfirm: runCancelPlan
+    });
   }
 
   async function sendMessage() {
@@ -1310,11 +1207,7 @@ export default function App() {
       setMessage(body);
       setChatStatus("error");
       const errorMessage = describeSupabaseError(error, "Could not send message.");
-      if (Platform.OS === "web") {
-        window.alert(`Message failed: ${errorMessage}`);
-      } else {
-        Alert.alert("Message failed", errorMessage);
-      }
+      showMessage("Message failed", errorMessage);
     }
   }
 
@@ -1344,11 +1237,7 @@ export default function App() {
       setDmMessage(body);
       setDmStatus("error");
       const errorMessage = describeSupabaseError(error, "Could not send DM.");
-      if (Platform.OS === "web") {
-        window.alert(`DM failed: ${errorMessage}`);
-      } else {
-        Alert.alert("DM failed", errorMessage);
-      }
+      showMessage("DM failed", errorMessage);
     }
   }
 
