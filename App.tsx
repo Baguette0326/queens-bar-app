@@ -28,7 +28,7 @@ import { fetchPinnedBarIds } from "./src/data/interestRepository";
 import { markNotificationRead, notifyPlanAttendees, notifyPlanCanceled, PlanNotification } from "./src/data/notificationRepository";
 import { fetchLeaderboard, searchProfiles } from "./src/data/peopleRepository";
 import { cancelPlan as cancelRemotePlan, createPlan as createRemotePlan, fetchPlans, joinPlan as joinRemotePlan, leavePlan as leaveRemotePlan, RemotePlan } from "./src/data/planRepository";
-import { createProfile, fetchProfile, getRankFromXp, Profile, roleDbToLabel, updateProfileDetails } from "./src/data/profileRepository";
+import { fetchProfile, getRankFromXp, Profile, roleDbToLabel } from "./src/data/profileRepository";
 import { describeSupabaseError } from "./src/data/supabaseError";
 import { supabase } from "./src/lib/supabase";
 import { createBarActions } from "./src/app/barActions";
@@ -38,6 +38,7 @@ import { avatarOptions, startingPlans } from "./src/app/demoData";
 import { createFriendActions } from "./src/app/friendActions";
 import { readStoredScreen, writeStoredScreen } from "./src/app/navigation";
 import { buildCreatePlanSchedule, formatCreatedPlanTime, formatCreateTime, parseCreateTime, sameMinute } from "./src/app/planSchedule";
+import { createProfileActions } from "./src/app/profileActions";
 import { getPatchProgress, getRankProgress, getUsernameCooldown } from "./src/app/profileProgress";
 import { createRemoteLoaders } from "./src/app/remoteLoaders";
 import type { CreatePlanDay, Plan, Screen } from "./src/app/types";
@@ -360,82 +361,6 @@ export default function App() {
     setAuthStatus("ready");
   }
 
-  async function saveOnboardingProfile() {
-    if (!session) {
-      setScreen("login");
-      return;
-    }
-
-    const trimmedUsername = username.trim();
-    if (!trimmedUsername) {
-      showMessage("Username required", "Pick a unique username before continuing.");
-      return;
-    }
-
-    setAuthStatus("saving");
-    try {
-      const savedProfile = await createProfile({
-        id: session.user.id,
-        username: trimmedUsername,
-        avatar,
-        roleLabel: role
-      });
-      setProfile(savedProfile);
-      setUsername(savedProfile.username);
-      setDraftUsername(savedProfile.username);
-      setXp(savedProfile.xp);
-      setScreen("discover");
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Could not save profile.";
-      showMessage("Profile not saved", message);
-    } finally {
-      setAuthStatus("ready");
-    }
-  }
-
-  async function saveProfileDetails() {
-    if (!session || profileSaveStatus === "saving") return;
-
-    const trimmedUsername = draftUsername.trim();
-    const usernameCooldown = getUsernameCooldown(profile);
-    const usernameChanged = Boolean(profile && trimmedUsername !== profile.username);
-
-    if (trimmedUsername.length < 3) {
-      showMessage("Profile not saved", "Display name must be at least 3 characters.");
-      return;
-    }
-
-    if (usernameChanged && !usernameCooldown.canChange) {
-      showMessage("Profile not saved", `You can change your display name again in ${usernameCooldown.daysLeft} day${usernameCooldown.daysLeft === 1 ? "" : "s"}.`);
-      return;
-    }
-
-    setProfileSaveStatus("saving");
-    try {
-      const savedProfile = await updateProfileDetails({
-        userId: session.user.id,
-        username: trimmedUsername,
-        updateUsername: usernameChanged,
-        avatar,
-        bio: draftBio.slice(0, 160)
-      });
-      setProfile(savedProfile);
-      setUsername(savedProfile.username);
-      setDraftUsername(savedProfile.username);
-      setAvatar(savedProfile.avatar);
-      if (savedProfile.bio !== null || !draftBio.trim()) {
-        setDraftBio(savedProfile.bio ?? "");
-      } else {
-        showMessage("Avatar saved", "Run supabase/add_profile_bio.sql to enable bio saving.", "Avatar saved. Run supabase/add_profile_bio.sql to enable bio saving.");
-      }
-    } catch (error) {
-      const message = describeSupabaseError(error, "Could not save profile.");
-      showMessage("Profile failed", message);
-    } finally {
-      setProfileSaveStatus("idle");
-    }
-  }
-
   const selectedChallenge = catalog.find((item) => item.id === selectedChallengeId) ?? catalog[0] ?? challenges[0];
   const selectedPlan = plans.find((item) => item.id === selectedPlanId) ?? plans[0];
   const selectedDmThread = dmThreads.find((thread) => thread.id === selectedDmThreadId);
@@ -513,6 +438,29 @@ export default function App() {
     });
   }, [browseCategory, catalog, completedBarIds, completionFilter, difficulty, query]);
   const visibleChallenges = filteredChallenges.slice(0, 80);
+
+  const {
+    saveOnboardingProfile,
+    saveProfileDetails
+  } = createProfileActions({
+    avatar,
+    draftBio,
+    draftUsername,
+    profile,
+    profileSaveStatus,
+    role,
+    sessionUserId: session?.user.id,
+    setAuthStatus,
+    setAvatar,
+    setDraftBio,
+    setDraftUsername,
+    setProfile,
+    setProfileSaveStatus,
+    setScreen,
+    setUsername,
+    setXp,
+    username
+  });
 
   function go(screenName: Screen) {
     if (screenName === "create") {
