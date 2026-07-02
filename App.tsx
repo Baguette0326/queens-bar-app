@@ -20,24 +20,23 @@ import {
 import type { Session } from "@supabase/supabase-js";
 import { AvatarId, BrowseCategory, Challenge, ChallengeCollection, ChallengeTone, challenges, getBrowseCategories } from "./src/data/catalog";
 import { fetchCatalogBars } from "./src/data/catalogRepository";
-import { RemoteChatMessage, sendChatMessage } from "./src/data/chatRepository";
+import { RemoteChatMessage } from "./src/data/chatRepository";
 import { fetchCompletedBarIds } from "./src/data/completionRepository";
 import { RemoteDmMessage, RemoteDmThread } from "./src/data/dmRepository";
 import { FriendRequest, FriendStatus } from "./src/data/friendRepository";
 import { fetchPinnedBarIds } from "./src/data/interestRepository";
-import { markNotificationRead, notifyPlanAttendees, notifyPlanCanceled, PlanNotification } from "./src/data/notificationRepository";
-import { fetchLeaderboard, searchProfiles } from "./src/data/peopleRepository";
-import { cancelPlan as cancelRemotePlan, createPlan as createRemotePlan, fetchPlans, joinPlan as joinRemotePlan, leavePlan as leaveRemotePlan, RemotePlan } from "./src/data/planRepository";
+import { markNotificationRead, PlanNotification } from "./src/data/notificationRepository";
+import { RemotePlan } from "./src/data/planRepository";
 import { fetchProfile, getRankFromXp, Profile, roleDbToLabel } from "./src/data/profileRepository";
-import { describeSupabaseError } from "./src/data/supabaseError";
 import { supabase } from "./src/lib/supabase";
 import { createBarActions } from "./src/app/barActions";
 import { createChatActions } from "./src/app/chatActions";
-import { confirmAction, showMessage } from "./src/app/dialogs";
+import { showMessage } from "./src/app/dialogs";
 import { avatarOptions, startingPlans } from "./src/app/demoData";
 import { createFriendActions } from "./src/app/friendActions";
 import { readStoredScreen, writeStoredScreen } from "./src/app/navigation";
-import { buildCreatePlanSchedule, formatCreatedPlanTime, formatCreateTime, parseCreateTime, sameMinute } from "./src/app/planSchedule";
+import { createPlanActions } from "./src/app/planActions";
+import { formatCreateTime } from "./src/app/planSchedule";
 import { createProfileActions } from "./src/app/profileActions";
 import { getPatchProgress, getRankProgress, getUsernameCooldown } from "./src/app/profileProgress";
 import { createRemoteLoaders } from "./src/app/remoteLoaders";
@@ -559,6 +558,39 @@ export default function App() {
     username
   });
 
+  const {
+    cancelPlan,
+    confirmJoinPlan,
+    confirmLeavePlan,
+    createPlan
+  } = createPlanActions({
+    canCurrentUserCancelPlan,
+    loadRemotePlans,
+    openChat,
+    openPlan,
+    planCap,
+    planDay,
+    planDetail,
+    planDurationMinutes,
+    planNote,
+    planPlace,
+    planTime,
+    planVisibility,
+    plans,
+    selectedChallenge,
+    selectedPlan,
+    sessionUserId: session?.user.id,
+    setChatMembersOpen,
+    setMessages,
+    setPlanCreateMessage,
+    setPlanTime,
+    setPlans,
+    setPublishingPlan,
+    setScreen,
+    setSelectedPlanId,
+    username
+  });
+
   async function openNotifications() {
     if (session) await loadNotifications(session.user.id);
     go("notifications");
@@ -609,245 +641,6 @@ export default function App() {
     }
 
     showMessage("Plan unavailable", "That plan is no longer active.", "That plan is no longer active.");
-  }
-
-  async function runJoinPlan() {
-    if (!session) {
-      go("login");
-      return;
-    }
-
-    try {
-      await joinRemotePlan(selectedPlan.id, session.user.id);
-      await sendChatMessage(selectedPlan.id, session.user.id, `${username} joined the plan.`);
-      notifyPlanAttendees(
-        selectedPlan.id,
-        session.user.id,
-        "group_join",
-        `${username} joined ${selectedChallenge.name}`,
-        `${username} is in for ${selectedPlan.place}.`
-      ).catch((error) => console.warn("Failed to notify plan attendees.", error));
-      const remotePlans = await loadRemotePlans(session.user.id);
-      const joinedPlan = remotePlans?.find((plan) => plan.id === selectedPlan.id);
-      if (joinedPlan) setSelectedPlanId(joinedPlan.id);
-      await openChat(selectedPlan.id);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Could not join plan.";
-      showMessage("Join failed", message);
-    }
-  }
-
-  async function runLeavePlan() {
-    if (!session || !selectedPlan) return;
-    const leavingPlanId = selectedPlan.id;
-
-    try {
-      await sendChatMessage(leavingPlanId, session.user.id, `${username} left the plan.`);
-      const planEnded = await leaveRemotePlan(leavingPlanId, session.user.id);
-      setMessages([]);
-      setChatMembersOpen(false);
-      go("chats");
-      setPlans((current) => {
-        const nextPlans = current.flatMap((plan) => {
-          if (plan.id !== leavingPlanId) return plan;
-          const updatedPlan = {
-            ...plan,
-            attendees: plan.attendees.filter((attendee) => attendee !== username),
-            attendeeProfiles: plan.attendeeProfiles?.filter((attendee) => attendee.id !== session.user.id) ?? [],
-            currentUserJoined: false
-          };
-
-          if (planEnded || updatedPlan.attendeeProfiles.length === 0 || updatedPlan.attendees.length === 0) return [];
-          return [updatedPlan];
-        });
-        return nextPlans;
-      });
-      const remotePlans = await loadRemotePlans(session.user.id);
-      if (remotePlans?.some((plan) => plan.id === leavingPlanId)) {
-        setSelectedPlanId(leavingPlanId);
-      }
-    } catch (error) {
-      const message = describeSupabaseError(error, "Could not leave plan. You may need to run supabase/add_leave_plan.sql.");
-      showMessage("Leave failed", message);
-    }
-  }
-
-  function confirmLeavePlan() {
-    if (!session || !selectedPlan) return;
-
-    confirmAction({
-      title: "Leave group?",
-      message: "You will be removed from the attendee list and group chat.",
-      webMessage: "Leave this group chat? You can join the plan again later if it is still open.",
-      cancelText: "Stay",
-      confirmText: "Leave",
-      destructive: true,
-      onConfirm: runLeavePlan
-    });
-  }
-
-  function confirmJoinPlan() {
-    if (!session) {
-      go("login");
-      return;
-    }
-
-    const message = `${selectedChallenge.name}\n${selectedPlan.place} Â· ${selectedPlan.startsAt}\n\nJoin this plan so the organizer can see you are coming?`;
-
-    confirmAction({
-      title: "Join this plan?",
-      message,
-      cancelText: "Not yet",
-      confirmText: "Confirm join",
-      onConfirm: runJoinPlan
-    });
-  }
-
-  async function createPlan() {
-    if (!session) {
-      go("login");
-      return;
-    }
-
-    let schedule = buildCreatePlanSchedule(planDay, planTime, planDurationMinutes);
-    if (!schedule) {
-      const parsedTime = parseCreateTime(planTime);
-      if (parsedTime && planDay === "Today") {
-        const refreshedStart = new Date(Date.now() + 60 * 60 * 1000);
-        schedule = {
-          startsAt: refreshedStart,
-          endsAt: new Date(refreshedStart.getTime() + planDurationMinutes * 60 * 1000)
-        };
-        setPlanTime(formatCreateTime(refreshedStart));
-        setPlanCreateMessage("That time had passed, so the plan time was moved one hour ahead.");
-      } else {
-        const message = "Enter a future time like 7:00 PM, 7 PM, or 19:00.";
-        setPlanCreateMessage(message);
-        showMessage("Check the time", message);
-        return;
-      }
-    }
-
-    const { startsAt, endsAt } = schedule;
-    const locationName = planPlace || selectedChallenge.places[0] || "Other";
-    const locationDetail = planDetail.trim();
-    const note = planNote.trim();
-    const duplicatePlan = plans.find(
-      (plan) =>
-        plan.challengeId === selectedChallenge.id &&
-        plan.place === locationName &&
-        plan.detail.trim().toLowerCase() === locationDetail.toLowerCase() &&
-        plan.startsAtIso &&
-        sameMinute(plan.startsAtIso, startsAt)
-    );
-
-    if (duplicatePlan) {
-      confirmAction({
-        title: "Plan already exists",
-        message: "There is already a plan for this bar at that exact time and place. Open that plan instead, or choose a different time/place once those controls are editable.",
-        webMessage: "There is already a plan for this bar at that exact time and place. Open that plan instead?",
-        cancelText: "Keep editing",
-        confirmText: "Open plan",
-        onConfirm: () => openPlan(duplicatePlan.id)
-      });
-      return;
-    }
-
-    try {
-      setPlanCreateMessage("");
-      setPublishingPlan(true);
-      const { data: authData, error: authError } = await supabase.auth.getUser();
-      if (authError || !authData.user) {
-        throw new Error(authError?.message ?? "You need to sign in again before creating a plan.");
-      }
-
-      const planId = await createRemotePlan({
-        catalogBarId: selectedChallenge.id,
-        userId: authData.user.id,
-        locationName,
-        locationDetail,
-        startsAt,
-        endsAt,
-        cap: planCap > 0 ? planCap : null,
-        note,
-        visibility: planVisibility
-      });
-      const optimisticPlan: Plan = {
-        id: planId,
-        challengeId: selectedChallenge.id,
-        place: locationName,
-        detail: locationDetail,
-        startsAt: formatCreatedPlanTime(startsAt),
-        startsAtIso: startsAt.toISOString(),
-        status: startsAt <= new Date() ? "ongoing" : "upcoming",
-        visibility: planVisibility,
-        attendees: [username],
-        cap: planCap > 0 ? planCap : undefined,
-        note,
-        startedBy: username,
-        startedById: authData.user.id,
-        currentUserJoined: true
-      };
-      setPlans((current) => [optimisticPlan, ...current.filter((plan) => plan.id !== planId)]);
-      setSelectedPlanId(planId);
-      go("discover");
-      loadRemotePlans(authData.user.id, planId).catch((error) => {
-        console.warn("Failed to refresh plans after publish.", error);
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Could not create plan.";
-      setPlanCreateMessage(message);
-      showMessage("Plan not created", message);
-    } finally {
-      setPublishingPlan(false);
-    }
-  }
-
-  async function cancelPlan() {
-    if (!session || !selectedPlan) return;
-
-    if (!canCurrentUserCancelPlan) {
-      const message = "You can only cancel a plan before anyone else joins. Ask attendees to leave first, or keep the plan active.";
-      showMessage("Plan has attendees", message, message);
-      return;
-    }
-
-    async function runCancelPlan() {
-      if (!session || !selectedPlan) return;
-      const canceledPlanId = selectedPlan.id;
-
-      try {
-        await cancelRemotePlan(canceledPlanId, session.user.id);
-        notifyPlanCanceled(
-          canceledPlanId,
-          session.user.id,
-          `${selectedChallenge.name} was canceled`,
-          `${selectedPlan.place} - ${selectedPlan.startsAt}`
-        ).catch((error) => console.warn("Failed to notify attendees about canceled plan.", error));
-        setPlans((current) => {
-          const nextPlans = current.filter((plan) => plan.id !== canceledPlanId);
-          setSelectedPlanId(nextPlans[0]?.id ?? "");
-          return nextPlans;
-        });
-        go("discover");
-        loadRemotePlans(session.user.id).catch((error) => {
-          console.warn("Failed to refresh plans after cancel.", error);
-        });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "Could not cancel plan.";
-        showMessage("Cancel failed", message);
-      }
-    }
-
-    confirmAction({
-      title: "Cancel this plan?",
-      message: "This removes it from discovery and stops new people from joining.",
-      webMessage: "Cancel this plan? It will disappear from discovery and stop new people from joining.",
-      cancelText: "Keep plan",
-      confirmText: "Cancel plan",
-      destructive: true,
-      onConfirm: runCancelPlan
-    });
   }
 
   const showTabs = !["login", "onboarding", "challenge", "plan", "create", "notifications", "completed", "people", "publicProfile", "leaderboard"].includes(screen);
